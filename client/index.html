@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Stellumin.io</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- HUD -->
+    <header class="hud">
+      <div class="brand">
+        <div class="logo">✦</div>
+        <div>
+          <div class="title">Stellumin.io</div>
+          <div class="subtitle">Collecte → masse → XP</div>
+        </div>
+      </div>
+
+      <div class="profile">
+        <img id="avatar" class="avatar" alt="avatar" />
+        <div class="meta">
+          <div class="line">
+            <span class="label">Pseudo</span>
+            <span id="pseudoLabel" class="value">—</span>
+          </div>
+          <div class="line">
+            <span class="label">Niveau</span>
+            <span id="levelLabel" class="value">1</span>
+          </div>
+          <div class="xpbar">
+            <div class="xpbarFill" id="xpFill"></div>
+          </div>
+          <div class="xptext" id="xpText">XP: 0 / 50</div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Canvas -->
+    <canvas id="game"></canvas>
+
+    <!-- Menu -->
+    <div id="menu" class="menu">
+      <div class="menuCard">
+        <div class="menuTitle">Stellumin.io</div>
+        <div class="menuRow">
+          <label>Pseudo</label>
+          <input id="pseudoInput" maxlength="20" placeholder="Slyreus" />
+        </div>
+        <div class="menuRow">
+          <label>Photo (URL)</label>
+          <input id="avatarInput" placeholder="https://..." />
+        </div>
+        <button id="playBtn" class="playBtn">Jouer</button>
+        <div class="hint">Déplace-toi avec la souris (ou trackpad). XP = masse ramassée.</div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
