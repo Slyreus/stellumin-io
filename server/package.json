@@ -1,0 +1,11 @@
+{
+  "name": "stellumin-server",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "ws": "^8.18.1"
+  },
+  "scripts": {
+    "start": "node server.js"
+  }
+}
