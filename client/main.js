@@ -217,7 +217,7 @@ playBtn.addEventListener("click", () => {
 
   // Connect (à remplacer par l'URL Fly une fois déployé)
   // En local : ws://localhost:8080
-  const serverUrl = "ws://localhost:8080";
+  const serverUrl = "wss://stellumin-server.fly.dev";
   connect(serverUrl, name, avatar);
 
   menu.style.display = "none";
