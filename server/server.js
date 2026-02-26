@@ -33,7 +33,7 @@ function radiusFromMass(mass) {
 }
 
 function speedFromMass(mass) {
-  // plus tu es gros, plus tu es lent (simple mais efficace)
+  // plus tu es gros, plus tu es lent
   return SPEED / (1 + Math.sqrt(mass) * 0.09);
 }
 
@@ -65,7 +65,7 @@ let foods = [];
 for (let i = 0; i < FOOD_TARGET; i++) foods.push(makeFood());
 
 function snapshotForClient() {
-  // Snapshot volontairement simple (pas optimisé)
+  // Snapshot volontairement simple (pas opti)
   const ps = [];
   for (const p of players.values()) {
     ps.push({
@@ -171,7 +171,7 @@ setInterval(() => {
     p.x = clamp(p.x, -WORLD_W / 2, WORLD_W / 2);
     p.y = clamp(p.y, -WORLD_H / 2, WORLD_H / 2);
 
-    // collisions nourriture (simple O(n), suffisant pour starter)
+    // collisions nourriture (simple O(n))
     const pr = radiusFromMass(p.mass);
     const pr2 = pr * pr;
     for (let i = foods.length - 1; i >= 0; i--) {
