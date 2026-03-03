@@ -10,8 +10,10 @@ const WORLD_H = 4000;
 
 // Nourriture
 const FOOD_TARGET = 1200;
-const FOOD_RADIUS = 6;
-const FOOD_MASS = 1;
+const FOOD_RADIUS = 5;
+const COMMON_FOOD_MASS = 1;
+const RARE_FOOD_MASS = 10;
+const RARE_FOOD_CHANCE = 0.06;
 
 // Joueurs
 const BASE_RADIUS = 18;
@@ -38,11 +40,14 @@ function speedFromMass(mass) {
 }
 
 function makeFood() {
+  const isRare = Math.random() < RARE_FOOD_CHANCE;
   return {
     id: cryptoRandomId(),
     x: rand(-WORLD_W / 2, WORLD_W / 2),
     y: rand(-WORLD_H / 2, WORLD_H / 2),
-    r: FOOD_RADIUS
+    r: FOOD_RADIUS,
+    kind: isRare ? "rare" : "common",
+    mass: isRare ? RARE_FOOD_MASS : COMMON_FOOD_MASS
   };
 }
 
@@ -178,8 +183,8 @@ setInterval(() => {
       const f = foods[i];
       if (dist2(p.x, p.y, f.x, f.y) <= (pr + f.r) * (pr + f.r)) {
         foods.splice(i, 1);
-        p.mass += FOOD_MASS;
-        p.xp += FOOD_MASS; // XP = masse ramassée
+        p.mass += f.mass;
+        p.xp += f.mass; // XP = masse ramassée
       }
     }
   }
