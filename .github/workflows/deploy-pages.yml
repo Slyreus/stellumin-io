@@ -26,13 +26,20 @@ jobs:
 
       - name: Build static artifact
         env:
-          TWITCH_ID_CLIENT: ${{ secrets.TWITCH_ID_CLIENT || vars.TWITCH_ID_CLIENT }}
+          TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID || secrets.TWITCH_ID_CLIENT || vars.TWITCH_CLIENT_ID || vars.TWITCH_ID_CLIENT }}
+          BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
         run: |
-          test -n "$TWITCH_ID_CLIENT" || (echo "Missing TWITCH_ID_CLIENT (set GitHub secret or variable)" && exit 1)
+          test -n "$TWITCH_CLIENT_ID" || (echo "Missing TWITCH_CLIENT_ID / TWITCH_ID_CLIENT (set GitHub environment secret or variable)" && exit 1)
           rm -rf dist
           mkdir -p dist
           cp -R client/. dist/
-          sed -i "s|__TWITCH_ID_CLIENT__|${TWITCH_ID_CLIENT}|g" dist/runtime-config.js
+          sed -i "s|__TWITCH_CLIENT_ID__|${TWITCH_CLIENT_ID}|g" dist/runtime-config.js
+          sed -i "s|__TWITCH_ID_CLIENT__|${TWITCH_CLIENT_ID}|g" dist/runtime-config.js
+          sed -i "s|__BUILD_ID__|${BUILD_ID}|g" dist/index.html
+          if rg -q "__TWITCH_(CLIENT_ID|ID_CLIENT)__" dist/runtime-config.js; then
+            echo "Runtime config still contains Twitch placeholders after build"
+            exit 1
+          fi
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
