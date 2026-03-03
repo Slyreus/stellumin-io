@@ -16,6 +16,7 @@ const levelLabel = $("levelLabel");
 
 const TWITCH_CLIENT_ID = "qjt85uubxukx6b0woq20r63sfermgz";
 const TWITCH_REDIRECT_URI = `${window.location.origin}${window.location.pathname}`;
+const TWITCH_USE_IMPLICIT_FLOW = window.location.hostname.endsWith("github.io");
 const TWITCH_STATE_KEY = "stellumin_twitch_state";
 const TWITCH_CODE_VERIFIER_KEY = "stellumin_twitch_code_verifier";
 const TWITCH_STORAGE_KEYS = {
@@ -174,14 +175,14 @@ async function maybeHandleTwitchRedirect() {
     sessionStorage.removeItem(TWITCH_STATE_KEY);
     sessionStorage.removeItem(TWITCH_CODE_VERIFIER_KEY);
     window.history.replaceState({}, document.title, TWITCH_REDIRECT_URI);
-    return;
+    return { handled: true, success: false };
   }
 
   const code = queryParams.get("code");
   const token = hashParams.get("access_token");
   const stateValue = queryParams.get("state") || hashParams.get("state");
 
-  if (!code && !token) return;
+  if (!code && !token) return { handled: false, success: false };
 
   sessionStorage.removeItem(TWITCH_STATE_KEY);
 
@@ -189,7 +190,7 @@ async function maybeHandleTwitchRedirect() {
     authStatus.textContent = "Connexion Twitch invalide (state mismatch).";
     sessionStorage.removeItem(TWITCH_CODE_VERIFIER_KEY);
     window.history.replaceState({}, document.title, TWITCH_REDIRECT_URI);
-    return;
+    return { handled: true, success: false };
   }
 
   try {
@@ -212,9 +213,11 @@ async function maybeHandleTwitchRedirect() {
     const profile = await fetchTwitchUser(accessToken);
     saveTwitchProfile(profile);
     updateAuthStatus(profile);
+    return { handled: true, success: true };
   } catch (err) {
     console.error(err);
     authStatus.textContent = "Erreur Twitch: impossible de charger le profil.";
+    return { handled: true, success: false };
   } finally {
     window.history.replaceState({}, document.title, TWITCH_REDIRECT_URI);
   }
@@ -223,16 +226,20 @@ async function maybeHandleTwitchRedirect() {
 async function startTwitchAuth() {
   const stateValue = randomState();
   const verifier = randomCodeVerifier();
-  const challenge = await createCodeChallenge(verifier);
   sessionStorage.setItem(TWITCH_STATE_KEY, stateValue);
   sessionStorage.setItem(TWITCH_CODE_VERIFIER_KEY, verifier);
 
   const authUrl = new URL("https://id.twitch.tv/oauth2/authorize");
   authUrl.searchParams.set("client_id", TWITCH_CLIENT_ID);
   authUrl.searchParams.set("redirect_uri", TWITCH_REDIRECT_URI);
-  authUrl.searchParams.set("response_type", "code");
-  authUrl.searchParams.set("code_challenge", challenge);
-  authUrl.searchParams.set("code_challenge_method", "S256");
+  if (TWITCH_USE_IMPLICIT_FLOW) {
+    authUrl.searchParams.set("response_type", "token");
+  } else {
+    const challenge = await createCodeChallenge(verifier);
+    authUrl.searchParams.set("response_type", "code");
+    authUrl.searchParams.set("code_challenge", challenge);
+    authUrl.searchParams.set("code_challenge_method", "S256");
+  }
   authUrl.searchParams.set("state", stateValue);
 
   window.location.href = authUrl.toString();
@@ -507,7 +514,8 @@ playBtn.addEventListener("click", () => {
 });
 
 (async () => {
-  await maybeHandleTwitchRedirect();
+  const authResult = await maybeHandleTwitchRedirect();
+  if (authResult.handled && !authResult.success) return;
   const profile = getSavedTwitchProfile();
   updateAuthStatus(profile);
 })();
