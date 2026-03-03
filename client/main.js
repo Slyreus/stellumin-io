@@ -14,7 +14,7 @@ const xpFill = $("xpFill");
 const xpText = $("xpText");
 const levelLabel = $("levelLabel");
 
-const TWITCH_CLIENT_ID = window.STELLUMIN_CONFIG?.TWITCH_CLIENT_ID || "__TWITCH_ID_CLIENT__";
+const TWITCH_CLIENT_ID = window.STELLUMIN_CONFIG?.TWITCH_CLIENT_ID || window.STELLUMIN_CONFIG?.TWITCH_ID_CLIENT || "__TWITCH_ID_CLIENT__";
 const TWITCH_REDIRECT_URI = `${window.location.origin}${window.location.pathname}`;
 const TWITCH_STATE_KEY = "stellumin_twitch_state";
 
@@ -141,7 +141,7 @@ async function maybeHandleTwitchRedirect() {
 
 function startTwitchAuth() {
   if (!TWITCH_CLIENT_ID || TWITCH_CLIENT_ID === "__TWITCH_ID_CLIENT__") {
-    authStatus.textContent = "Configure TWITCH_ID_CLIENT (runtime-config) avant utilisation.";
+    authStatus.textContent = "Configure TWITCH_ID_CLIENT / TWITCH_CLIENT_ID (runtime-config) avant utilisation.";
     return;
   }
 

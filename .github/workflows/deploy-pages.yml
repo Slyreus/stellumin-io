@@ -26,9 +26,9 @@ jobs:
 
       - name: Build static artifact
         env:
-          TWITCH_ID_CLIENT: ${{ secrets.TWITCH_ID_CLIENT }}
+          TWITCH_ID_CLIENT: ${{ secrets.TWITCH_ID_CLIENT || vars.TWITCH_ID_CLIENT }}
         run: |
-          test -n "$TWITCH_ID_CLIENT" || (echo "Missing TWITCH_ID_CLIENT secret" && exit 1)
+          test -n "$TWITCH_ID_CLIENT" || (echo "Missing TWITCH_ID_CLIENT (set GitHub secret or variable)" && exit 1)
           rm -rf dist
           mkdir -p dist
           cp -R client/. dist/
