@@ -14,11 +14,14 @@ const xpFill = $("xpFill");
 const xpText = $("xpText");
 const levelLabel = $("levelLabel");
 
-const twitchClientIdFromConfig = window.STELLUMIN_CONFIG?.TWITCH_CLIENT_ID || window.STELLUMIN_CONFIG?.TWITCH_ID_CLIENT || "";
-const isPlaceholderClientId = /^__TWITCH_(CLIENT_ID|ID_CLIENT)__$/.test(twitchClientIdFromConfig);
-const TWITCH_CLIENT_ID = isPlaceholderClientId ? "" : twitchClientIdFromConfig;
+const TWITCH_CLIENT_ID = "qjt85uubxukx6b0woq20r63sfermgz";
 const TWITCH_REDIRECT_URI = `${window.location.origin}${window.location.pathname}`;
 const TWITCH_STATE_KEY = "stellumin_twitch_state";
+const TWITCH_STORAGE_KEYS = {
+  id: "stellumin_twitch_id",
+  login: "stellumin_twitch_login",
+  avatar: "stellumin_twitch_avatar"
+};
 
 let ws = null;
 let myId = null;
@@ -74,18 +77,18 @@ function updateAuthStatus(profile) {
 }
 
 function getSavedTwitchProfile() {
-  const id = localStorage.getItem("stellumin_twitch_id") || "";
-  const login = localStorage.getItem("stellumin_twitch_login") || "";
-  const avatar = localStorage.getItem("stellumin_twitch_avatar") || "";
+  const id = localStorage.getItem(TWITCH_STORAGE_KEYS.id) || "";
+  const login = localStorage.getItem(TWITCH_STORAGE_KEYS.login) || "";
+  const avatar = localStorage.getItem(TWITCH_STORAGE_KEYS.avatar) || "";
 
   if (!id || !login) return null;
   return { id, login, avatar };
 }
 
 function saveTwitchProfile(profile) {
-  localStorage.setItem("stellumin_twitch_id", profile.id);
-  localStorage.setItem("stellumin_twitch_login", profile.login);
-  localStorage.setItem("stellumin_twitch_avatar", profile.avatar || "");
+  localStorage.setItem(TWITCH_STORAGE_KEYS.id, profile.id);
+  localStorage.setItem(TWITCH_STORAGE_KEYS.login, profile.login);
+  localStorage.setItem(TWITCH_STORAGE_KEYS.avatar, profile.avatar || "");
 }
 
 async function fetchTwitchUser(accessToken) {
@@ -123,6 +126,7 @@ async function maybeHandleTwitchRedirect() {
   if (!token) return;
 
   const expectedState = sessionStorage.getItem(TWITCH_STATE_KEY);
+  sessionStorage.removeItem(TWITCH_STATE_KEY);
   window.history.replaceState({}, document.title, TWITCH_REDIRECT_URI);
 
   if (!expectedState || stateValue !== expectedState) {
@@ -142,11 +146,6 @@ async function maybeHandleTwitchRedirect() {
 }
 
 function startTwitchAuth() {
-  if (!TWITCH_CLIENT_ID) {
-    authStatus.textContent = "Configure TWITCH_ID_CLIENT / TWITCH_CLIENT_ID (runtime-config) avant utilisation.";
-    return;
-  }
-
   const stateValue = randomState();
   sessionStorage.setItem(TWITCH_STATE_KEY, stateValue);
 
