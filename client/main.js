@@ -5,14 +5,18 @@ const ctx = canvas.getContext("2d");
 
 const menu = $("menu");
 const playBtn = $("playBtn");
-const pseudoInput = $("pseudoInput");
-const avatarInput = $("avatarInput");
+const twitchBtn = $("twitchBtn");
+const authStatus = $("authStatus");
 
 const pseudoLabel = $("pseudoLabel");
 const avatarImg = $("avatar");
 const xpFill = $("xpFill");
 const xpText = $("xpText");
 const levelLabel = $("levelLabel");
+
+const TWITCH_CLIENT_ID = window.STELLUMIN_CONFIG?.TWITCH_CLIENT_ID || "__TWITCH_ID_CLIENT__";
+const TWITCH_REDIRECT_URI = `${window.location.origin}${window.location.pathname}`;
+const TWITCH_STATE_KEY = "stellumin_twitch_state";
 
 let ws = null;
 let myId = null;
@@ -26,6 +30,7 @@ let state = {
 let myLocal = {
   name: "Player",
   avatar: "",
+  twitchId: "",
   xp: 0,
   level: 1
 };
@@ -38,6 +43,120 @@ const backgroundStars = Array.from({ length: 260 }, () => ({
   glow: Math.random() * 0.55 + 0.2,
   drift: Math.random() * 0.35 + 0.65
 }));
+
+
+function getServerUrl() {
+  const fromConfig = window.STELLUMIN_CONFIG?.WS_SERVER_URL;
+  if (fromConfig) return fromConfig;
+
+  const host = window.location.hostname;
+  const isLocal = host === "localhost" || host === "127.0.0.1";
+  if (isLocal) return "ws://localhost:8080";
+
+  return "wss://stellumin-server.fly.dev";
+}
+
+function randomState() {
+  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
+function updateAuthStatus(profile) {
+  if (!profile) {
+    authStatus.textContent = "Non connecté à Twitch.";
+    playBtn.disabled = true;
+    return;
+  }
+
+  authStatus.textContent = `Connecté en tant que ${profile.login} (ID: ${profile.id})`;
+  playBtn.disabled = false;
+}
+
+function getSavedTwitchProfile() {
+  const id = localStorage.getItem("stellumin_twitch_id") || "";
+  const login = localStorage.getItem("stellumin_twitch_login") || "";
+  const avatar = localStorage.getItem("stellumin_twitch_avatar") || "";
+
+  if (!id || !login) return null;
+  return { id, login, avatar };
+}
+
+function saveTwitchProfile(profile) {
+  localStorage.setItem("stellumin_twitch_id", profile.id);
+  localStorage.setItem("stellumin_twitch_login", profile.login);
+  localStorage.setItem("stellumin_twitch_avatar", profile.avatar || "");
+}
+
+async function fetchTwitchUser(accessToken) {
+  const response = await fetch("https://api.twitch.tv/helix/users", {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Client-Id": TWITCH_CLIENT_ID
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Impossible de récupérer le profil Twitch (${response.status}).`);
+  }
+
+  const json = await response.json();
+  const user = json?.data?.[0];
+  if (!user) {
+    throw new Error("Profil Twitch introuvable.");
+  }
+
+  return {
+    id: user.id,
+    login: user.display_name || user.login,
+    avatar: user.profile_image_url || ""
+  };
+}
+
+async function maybeHandleTwitchRedirect() {
+  if (!window.location.hash.startsWith("#")) return;
+
+  const hashParams = new URLSearchParams(window.location.hash.slice(1));
+  const token = hashParams.get("access_token");
+  const stateValue = hashParams.get("state");
+
+  if (!token) return;
+
+  const expectedState = sessionStorage.getItem(TWITCH_STATE_KEY);
+  window.history.replaceState({}, document.title, TWITCH_REDIRECT_URI);
+
+  if (!expectedState || stateValue !== expectedState) {
+    authStatus.textContent = "Connexion Twitch invalide (state mismatch).";
+    return;
+  }
+
+  try {
+    authStatus.textContent = "Récupération du profil Twitch...";
+    const profile = await fetchTwitchUser(token);
+    saveTwitchProfile(profile);
+    updateAuthStatus(profile);
+  } catch (err) {
+    console.error(err);
+    authStatus.textContent = "Erreur Twitch: impossible de charger le profil.";
+  }
+}
+
+function startTwitchAuth() {
+  if (!TWITCH_CLIENT_ID || TWITCH_CLIENT_ID === "__TWITCH_ID_CLIENT__") {
+    authStatus.textContent = "Configure TWITCH_ID_CLIENT (runtime-config) avant utilisation.";
+    return;
+  }
+
+  const stateValue = randomState();
+  sessionStorage.setItem(TWITCH_STATE_KEY, stateValue);
+
+  const authUrl = new URL("https://id.twitch.tv/oauth2/authorize");
+  authUrl.searchParams.set("client_id", TWITCH_CLIENT_ID);
+  authUrl.searchParams.set("redirect_uri", TWITCH_REDIRECT_URI);
+  authUrl.searchParams.set("response_type", "token");
+  authUrl.searchParams.set("scope", "");
+  authUrl.searchParams.set("state", stateValue);
+
+  window.location.href = authUrl.toString();
+}
 
 // XP / niveaux : simple et réglable
 function xpForLevel(level) {
@@ -63,14 +182,6 @@ function resize() {
 window.addEventListener("resize", resize);
 resize();
 
-function loadProfile() {
-  const savedName = localStorage.getItem("stellumin_name");
-  const savedAvatar = localStorage.getItem("stellumin_avatar");
-  if (savedName) pseudoInput.value = savedName;
-  if (savedAvatar) avatarInput.value = savedAvatar;
-}
-loadProfile();
-
 function setHud(name, avatarUrl, xp) {
   pseudoLabel.textContent = name || "—";
   avatarImg.src = avatarUrl || "data:image/svg+xml;utf8," + encodeURIComponent(`
@@ -87,11 +198,11 @@ function setHud(name, avatarUrl, xp) {
   xpFill.style.width = `${Math.floor((inLevelXp / next) * 100)}%`;
 }
 
-function connect(serverUrl, name, avatar) {
+function connect(serverUrl, name, avatar, twitchId) {
   ws = new WebSocket(serverUrl);
 
   ws.addEventListener("open", () => {
-    ws.send(JSON.stringify({ type: "join", name, avatar }));
+    ws.send(JSON.stringify({ type: "join", name, avatar, twitchId }));
   });
 
   ws.addEventListener("message", (ev) => {
@@ -110,6 +221,8 @@ function connect(serverUrl, name, avatar) {
       const me = state.players.find(p => p.id === myId);
       if (me) {
         myLocal.xp = me.xp;
+        myLocal.name = me.name || myLocal.name;
+        myLocal.avatar = me.avatar || myLocal.avatar;
         setHud(myLocal.name, myLocal.avatar, myLocal.xp);
       }
     }
@@ -282,23 +395,24 @@ function draw() {
   requestAnimationFrame(draw);
 }
 
+twitchBtn.addEventListener("click", startTwitchAuth);
+
 playBtn.addEventListener("click", () => {
-  const name = (pseudoInput.value || "Player").trim().slice(0, 20);
-  const avatar = (avatarInput.value || "").trim().slice(0, 400);
+  const profile = getSavedTwitchProfile();
+  if (!profile) {
+    authStatus.textContent = "Connecte-toi d'abord avec Twitch.";
+    return;
+  }
 
-  localStorage.setItem("stellumin_name", name);
-  localStorage.setItem("stellumin_avatar", avatar);
-
-  myLocal.name = name;
-  myLocal.avatar = avatar;
+  myLocal.name = profile.login;
+  myLocal.avatar = profile.avatar;
+  myLocal.twitchId = profile.id;
 
   // HUD initial
-  setHud(name, avatar, 0);
+  setHud(profile.login, profile.avatar, 0);
 
-  // Connect (à remplacer par l'URL Fly une fois déployé)
-  // En local : ws://localhost:8080
-  const serverUrl = "ws://localhost:8080";
-  connect(serverUrl, name, avatar);
+  const serverUrl = getServerUrl();
+  connect(serverUrl, profile.login, profile.avatar, profile.id);
 
   menu.style.display = "none";
 
@@ -306,3 +420,9 @@ playBtn.addEventListener("click", () => {
   setInterval(sendInput, 50);
   requestAnimationFrame(draw);
 });
+
+(async () => {
+  await maybeHandleTwitchRedirect();
+  const profile = getSavedTwitchProfile();
+  updateAuthStatus(profile);
+})();
