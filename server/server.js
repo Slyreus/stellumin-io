@@ -1,4 +1,6 @@
 import { WebSocketServer } from "ws";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
 const TICK_HZ = 20;
@@ -19,6 +21,11 @@ const RARE_FOOD_CHANCE = 0.06;
 const BASE_RADIUS = 18;
 const SPEED = 360; // unités/s (sera ralenti par la masse)
 const DRAG = 0.92;
+const START_MASS = 10;
+
+// Persistance
+const DATA_DIR = path.resolve("./data");
+const PLAYER_STORE_PATH = path.join(DATA_DIR, "player-progress.json");
 
 // Util
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -60,14 +67,86 @@ const wss = new WebSocketServer({ port: PORT });
 
 /**
  * players: id -> {
- *   id, name, avatar, x,y, vx,vy, mass, xp, input {dx,dy}
+ *   id, accountId, name, avatar, x,y, vx,vy, mass, xp, input {dx,dy}
  * }
  */
 const players = new Map();
 const sockets = new Map(); // ws -> playerId
+const progressByAccount = new Map();
+let saveTimer = null;
 
 let foods = [];
 for (let i = 0; i < FOOD_TARGET; i++) foods.push(makeFood());
+
+async function loadProgress() {
+  try {
+    const raw = await readFile(PLAYER_STORE_PATH, "utf8");
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return;
+
+    for (const [accountId, record] of Object.entries(parsed)) {
+      if (!record || typeof record !== "object") continue;
+      progressByAccount.set(accountId, {
+        xp: Math.max(0, Number(record.xp) || 0),
+        mass: Math.max(START_MASS, Number(record.mass) || START_MASS),
+        name: typeof record.name === "string" ? record.name.slice(0, 20) : "",
+        avatar: typeof record.avatar === "string" ? record.avatar.slice(0, 400) : "",
+        updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : new Date().toISOString()
+      });
+    }
+    console.log(`Loaded ${progressByAccount.size} player progress records.`);
+  } catch (err) {
+    if (err && err.code === "ENOENT") {
+      console.log("No existing player progress store yet.");
+      return;
+    }
+    console.error("Failed to load player progress:", err);
+  }
+}
+
+async function flushProgressToDisk() {
+  const output = {};
+  for (const [accountId, record] of progressByAccount.entries()) {
+    output[accountId] = record;
+  }
+
+  try {
+    await mkdir(DATA_DIR, { recursive: true });
+    await writeFile(PLAYER_STORE_PATH, `${JSON.stringify(output, null, 2)}\n`, "utf8");
+  } catch (err) {
+    console.error("Failed to save player progress:", err);
+  }
+}
+
+function scheduleProgressSave() {
+  if (saveTimer) return;
+  saveTimer = setTimeout(async () => {
+    saveTimer = null;
+    await flushProgressToDisk();
+  }, 1500);
+}
+
+function persistPlayerProgress(player) {
+  if (!player?.accountId) return;
+
+  progressByAccount.set(player.accountId, {
+    xp: Math.max(0, Math.floor(player.xp || 0)),
+    mass: Math.max(START_MASS, Number(player.mass) || START_MASS),
+    name: typeof player.name === "string" ? player.name.slice(0, 20) : "",
+    avatar: typeof player.avatar === "string" ? player.avatar.slice(0, 400) : "",
+    updatedAt: new Date().toISOString()
+  });
+
+  scheduleProgressSave();
+}
+
+function applySavedProgress(player) {
+  const saved = progressByAccount.get(player.accountId);
+  if (!saved) return;
+
+  player.xp = Math.max(0, Number(saved.xp) || 0);
+  player.mass = Math.max(START_MASS, Number(saved.mass) || START_MASS);
+}
 
 function snapshotForClient() {
   // Snapshot volontairement simple (pas opti)
@@ -75,6 +154,7 @@ function snapshotForClient() {
   for (const p of players.values()) {
     ps.push({
       id: p.id,
+      accountId: p.accountId,
       name: p.name,
       avatar: p.avatar,
       x: p.x,
@@ -113,19 +193,23 @@ wss.on("connection", (ws) => {
       const id = cryptoRandomId();
       const name = typeof msg.name === "string" ? msg.name.slice(0, 20) : "Player";
       const avatar = typeof msg.avatar === "string" ? msg.avatar.slice(0, 400) : "";
+      const twitchId = typeof msg.twitchId === "string" ? msg.twitchId.slice(0, 64) : "";
 
       const p = {
         id,
+        accountId: twitchId || id,
         name,
         avatar,
         x: rand(-500, 500),
         y: rand(-500, 500),
         vx: 0,
         vy: 0,
-        mass: 10,
+        mass: START_MASS,
         xp: 0,
         input: { dx: 0, dy: 0 }
       };
+
+      applySavedProgress(p);
 
       players.set(id, p);
       sockets.set(ws, id);
@@ -152,7 +236,13 @@ wss.on("connection", (ws) => {
   ws.on("close", () => {
     const pid = sockets.get(ws);
     sockets.delete(ws);
-    if (pid) players.delete(pid);
+    if (!pid) return;
+
+    const player = players.get(pid);
+    if (player) {
+      persistPlayerProgress(player);
+      players.delete(pid);
+    }
   });
 });
 
@@ -178,13 +268,13 @@ setInterval(() => {
 
     // collisions nourriture (simple O(n))
     const pr = radiusFromMass(p.mass);
-    const pr2 = pr * pr;
     for (let i = foods.length - 1; i >= 0; i--) {
       const f = foods[i];
       if (dist2(p.x, p.y, f.x, f.y) <= (pr + f.r) * (pr + f.r)) {
         foods.splice(i, 1);
         p.mass += f.mass;
         p.xp += f.mass; // XP = masse ramassée
+        persistPlayerProgress(p);
       }
     }
   }
@@ -192,4 +282,5 @@ setInterval(() => {
   broadcast({ type: "state", ...snapshotForClient() });
 }, 1000 / TICK_HZ);
 
+await loadProgress();
 console.log(`Stellumin.io server listening on :${PORT}`);
