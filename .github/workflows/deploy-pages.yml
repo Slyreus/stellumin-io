@@ -1,0 +1,47 @@
+name: Deploy client to GitHub Pages
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build static artifact
+        env:
+          TWITCH_ID_CLIENT: ${{ secrets.TWITCH_ID_CLIENT }}
+        run: |
+          test -n "$TWITCH_ID_CLIENT" || (echo "Missing TWITCH_ID_CLIENT secret" && exit 1)
+          rm -rf dist
+          mkdir -p dist
+          cp -R client/. dist/
+          sed -i "s|__TWITCH_ID_CLIENT__|${TWITCH_ID_CLIENT}|g" dist/runtime-config.js
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
