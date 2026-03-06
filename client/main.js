@@ -16,9 +16,10 @@ const levelLabel = $("levelLabel");
 
 const TWITCH_CLIENT_ID = "qjt85uubxukx6b0woq20r63sfermgz";
 const TWITCH_REDIRECT_URI = `${window.location.origin}${window.location.pathname}`;
-// Le flow implicite (`response_type=token`) est déprécié côté OAuth.
-// On force PKCE partout (y compris GitHub Pages) pour éviter les retours sans token.
-const TWITCH_USE_IMPLICIT_FLOW = false;
+const TWITCH_SCOPES = ["user:read:email"];
+// GitHub Pages = client statique (pas de secret serveur), on privilégie le flow implicite.
+// Hors GitHub Pages, on utilise PKCE (Authorization Code + code_challenge).
+const TWITCH_USE_IMPLICIT_FLOW = window.location.hostname.endsWith("github.io");
 const TWITCH_STATE_KEY = "stellumin_twitch_state";
 const TWITCH_CODE_VERIFIER_KEY = "stellumin_twitch_code_verifier";
 const TWITCH_STORAGE_KEYS = {
@@ -124,8 +125,33 @@ function saveTwitchProfile(profile) {
   localStorage.setItem(TWITCH_STORAGE_KEYS.avatar, profile.avatar || "");
 }
 
+async function fetchTwitchIdentity(accessToken) {
+  const response = await fetch("https://id.twitch.tv/oauth2/validate", {
+    headers: {
+      Authorization: `OAuth ${accessToken}`
+    }
+  });
+
+  if (!response.ok) {
+    const details = await parseTwitchError(response);
+    throw new Error(`Token Twitch invalide (${details}).`);
+  }
+
+  const identity = await response.json();
+  if (!identity?.user_id || !identity?.login) {
+    throw new Error("Token Twitch valide mais identité utilisateur absente.");
+  }
+
+  return {
+    id: identity.user_id,
+    login: identity.login
+  };
+}
+
 async function fetchTwitchUser(accessToken) {
-  const response = await fetch("https://api.twitch.tv/helix/users", {
+  const identity = await fetchTwitchIdentity(accessToken);
+
+  const response = await fetch(`https://api.twitch.tv/helix/users?id=${encodeURIComponent(identity.id)}`, {
     headers: {
       Authorization: `Bearer ${accessToken}`,
       "Client-ID": TWITCH_CLIENT_ID
@@ -134,18 +160,27 @@ async function fetchTwitchUser(accessToken) {
 
   if (!response.ok) {
     const details = await parseTwitchError(response);
-    throw new Error(`Impossible de récupérer le profil Twitch (${details}).`);
+    console.warn(`Profil Twitch partiel: ${details}`);
+    return {
+      id: identity.id,
+      login: identity.login,
+      avatar: ""
+    };
   }
 
   const json = await response.json();
   const user = json?.data?.[0];
   if (!user) {
-    throw new Error("Profil Twitch introuvable.");
+    return {
+      id: identity.id,
+      login: identity.login,
+      avatar: ""
+    };
   }
 
   return {
-    id: user.id,
-    login: user.display_name || user.login,
+    id: user.id || identity.id,
+    login: user.display_name || user.login || identity.login,
     avatar: user.profile_image_url || ""
   };
 }
@@ -256,6 +291,7 @@ async function startTwitchAuth() {
   const authUrl = new URL("https://id.twitch.tv/oauth2/authorize");
   authUrl.searchParams.set("client_id", TWITCH_CLIENT_ID);
   authUrl.searchParams.set("redirect_uri", TWITCH_REDIRECT_URI);
+  authUrl.searchParams.set("scope", TWITCH_SCOPES.join(" "));
   if (TWITCH_USE_IMPLICIT_FLOW) {
     authUrl.searchParams.set("response_type", "token");
   } else {
