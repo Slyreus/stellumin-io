@@ -91,6 +91,7 @@ const wss = new WebSocketServer({ port: PORT });
 const players = new Map();
 const sockets = new Map();
 const playerSocketById = new Map();
+const pendingEliminations = new Map();
 const progressByAccount = new Map();
 let saveTimer = null;
 
@@ -176,10 +177,10 @@ function upsertProgress(accountId, patch) {
   scheduleProgressSave();
 }
 
-function awardGlobalXpAndRemove(playerId, reason) {
-  const player = players.get(playerId);
+function finalizeRunEndForPlayer(player, reason) {
   if (!player) return;
 
+  const playerId = player.id;
   const earnedXp = Math.max(0, Math.floor(player.sessionMassGained * MASS_TO_GLOBAL_XP_RATE));
   const progress = getOrCreateProgress(player.accountId, player.name, player.avatar);
   const totalXp = progress.xp + earnedXp;
@@ -200,6 +201,41 @@ function awardGlobalXpAndRemove(playerId, reason) {
 
   players.delete(playerId);
   playerSocketById.delete(playerId);
+}
+
+function awardGlobalXpAndRemove(playerId, reason) {
+  const player = players.get(playerId);
+  if (!player) return;
+  finalizeRunEndForPlayer(player, reason);
+}
+
+function scheduleEliminationRunEnd(playerId, reason = "eaten", delayMs = 5000) {
+  const player = players.get(playerId);
+  if (!player) return;
+
+  const ws = playerSocketById.get(playerId);
+  sendToSocket(ws, {
+    type: "eliminated",
+    reason,
+    durationMs: delayMs,
+    camera: {
+      x: player.x,
+      y: player.y,
+      mass: player.mass
+    }
+  });
+
+  players.delete(playerId);
+
+  const existingTimer = pendingEliminations.get(playerId);
+  if (existingTimer) clearTimeout(existingTimer);
+
+  const timer = setTimeout(() => {
+    pendingEliminations.delete(playerId);
+    finalizeRunEndForPlayer(player, reason);
+  }, delayMs);
+
+  pendingEliminations.set(playerId, timer);
 }
 
 function statusForClient() {
@@ -251,7 +287,10 @@ function removePlayerForSocket(ws, reason = "left") {
   const pid = sockets.get(ws);
   sockets.delete(ws);
   if (!pid) return;
-  awardGlobalXpAndRemove(pid, reason);
+
+  if (!pendingEliminations.has(pid)) {
+    awardGlobalXpAndRemove(pid, reason);
+  }
 }
 
 wss.on("connection", (ws) => {
@@ -396,19 +435,19 @@ setInterval(() => {
       if (d2 > eatDistance * eatDistance) continue;
 
       if (a.mass > b.mass * 1.12) {
-        a.mass += b.mass * 0.72;
-        a.sessionMassGained += b.mass * 0.5;
+        a.mass += b.mass * 0.9;
+        a.sessionMassGained += b.mass * 0.75;
         deaths.add(b.id);
       } else if (b.mass > a.mass * 1.12) {
-        b.mass += a.mass * 0.72;
-        b.sessionMassGained += a.mass * 0.5;
+        b.mass += a.mass * 0.9;
+        b.sessionMassGained += a.mass * 0.75;
         deaths.add(a.id);
       }
     }
   }
 
   for (const id of deaths) {
-    awardGlobalXpAndRemove(id, "eaten");
+    scheduleEliminationRunEnd(id, "eaten", 5000);
   }
 
   broadcast(statusForClient());
