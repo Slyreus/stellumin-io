@@ -16,13 +16,10 @@ html,body{ height:100%; margin:0; background:var(--bg); color:var(--text); font-
 canvas{ display:block; width:100vw; height:100vh; }
 
 .hud{
-  position:fixed; inset:0 0 auto 0;
-  display:grid;
-  grid-template-columns:auto auto 1fr auto;
-  align-items:start;
-  gap:10px;
-  padding:14px 16px;
+  position:fixed;
+  inset:0;
   pointer-events:none;
+  padding:14px 16px;
 }
 .brand, .profile, .top10Hud{
   display:flex;
@@ -35,15 +32,23 @@ canvas{ display:block; width:100vw; height:100vh; }
   backdrop-filter: blur(12px);
   box-shadow:0 0 22px rgba(143,88,255,.22);
 }
+.brand,
+.profile{
+  position:relative;
+  margin-right:10px;
+  display:inline-flex;
+}
 .top10Hud{
-  align-self:start;
+  position:fixed;
+  top:14px;
+  right:16px;
   flex-direction:column;
   align-items:stretch;
   min-width:230px;
   max-width:260px;
+  background:linear-gradient(140deg, rgba(36,20,70,.56), rgba(24,14,44,.56));
 }
-.top10Hud ol,
-.menuTopWrap ol{
+.top10Hud ol{
   list-style:none;
   margin:8px 0 0;
   padding:0;
@@ -51,15 +56,13 @@ canvas{ display:block; width:100vw; height:100vh; }
   gap:4px;
   font-size:12px;
 }
-.top10Hud li,
-.menuTopWrap li{
+.top10Hud li{
   display:flex;
   justify-content:space-between;
   gap:8px;
   color:var(--muted);
 }
-.top10Hud li strong,
-.menuTopWrap li strong{ color:var(--text); }
+.top10Hud li strong{ color:var(--text); }
 .topTitle{ font-size:12px; font-weight:800; color:var(--text); }
 
 .logo{
@@ -84,6 +87,9 @@ canvas{ display:block; width:100vw; height:100vh; }
 .value{ color:var(--text); font-weight:700; }
 
 .quitBtn{
+  position:fixed;
+  right:16px;
+  bottom:14px;
   pointer-events:auto;
   border:1px solid rgba(255,120,120,.55);
   background:rgba(90,20,36,.5);
@@ -142,7 +148,8 @@ canvas{ display:block; width:100vw; height:100vh; }
   border-radius:12px;
   background:rgba(18, 12, 36, .55);
 }
-.menuTopWrap{ margin-top:10px; }
+.menuServerStatus{ margin-top:12px; }
+.menuSectionTitle{ font-size:12px; font-weight:800; color:var(--muted); margin-bottom:6px; }
 
 .twitchBtn,.playBtn{
   width:100%;

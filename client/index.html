@@ -17,7 +17,7 @@
         </div>
       </div>
 
-      <div class="profile">
+      <div id="hudProfile" class="profile">
         <img id="avatar" class="avatar" alt="avatar" />
         <div class="meta">
           <div class="line">
@@ -31,7 +31,7 @@
         </div>
       </div>
 
-      <aside class="top10Hud">
+      <aside id="hudTop10" class="top10Hud">
         <div class="topTitle">Top 10</div>
         <ol id="top10List"></ol>
       </aside>
@@ -58,11 +58,9 @@
         </div>
         <div id="menuXpText" class="xptext">EXP globale · Niveau 1 · 0 / 50</div>
 
-        <div id="gameStatus" class="gameStatus">Aucune partie en cours · En attente du premier joueur</div>
-
-        <div class="menuTopWrap">
-          <div class="topTitle">Top 10 en cours</div>
-          <ol id="menuLeaderboard"></ol>
+        <div class="menuServerStatus">
+          <div class="menuSectionTitle">État de la partie</div>
+          <div id="gameStatus" class="gameStatus">Aucune partie en cours · En attente du premier joueur</div>
         </div>
 
         <button id="twitchBtn" class="twitchBtn">Se connecter avec Twitch</button>
