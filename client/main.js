@@ -16,9 +16,9 @@ const levelLabel = $("levelLabel");
 
 const TWITCH_CLIENT_ID = "qjt85uubxukx6b0woq20r63sfermgz";
 const TWITCH_REDIRECT_URI = `${window.location.origin}${window.location.pathname}`;
-// GitHub Pages = client statique (pas de secret serveur), on privilégie le flow implicite.
-// Hors GitHub Pages, on utilise PKCE (Authorization Code + code_challenge).
-const TWITCH_USE_IMPLICIT_FLOW = window.location.hostname.endsWith("github.io");
+// Le flow implicite (`response_type=token`) est déprécié côté OAuth.
+// On force PKCE partout (y compris GitHub Pages) pour éviter les retours sans token.
+const TWITCH_USE_IMPLICIT_FLOW = false;
 const TWITCH_STATE_KEY = "stellumin_twitch_state";
 const TWITCH_CODE_VERIFIER_KEY = "stellumin_twitch_code_verifier";
 const TWITCH_STORAGE_KEYS = {
