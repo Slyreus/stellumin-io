@@ -5,29 +5,26 @@ import path from "node:path";
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
 const TICK_HZ = 20;
 const DT = 1 / TICK_HZ;
+const MAX_PLAYERS = 30;
 
-// Monde
 const WORLD_W = 4000;
 const WORLD_H = 4000;
 
-// Nourriture
 const FOOD_TARGET = 1200;
 const FOOD_RADIUS = 5;
 const COMMON_FOOD_MASS = 1;
 const RARE_FOOD_MASS = 10;
 const RARE_FOOD_CHANCE = 0.06;
 
-// Joueurs
 const BASE_RADIUS = 18;
-const SPEED = 360; // unités/s (sera ralenti par la masse)
+const SPEED = 360;
 const DRAG = 0.92;
 const START_MASS = 10;
+const MASS_TO_GLOBAL_XP_RATE = 0.35;
 
-// Persistance
 const DATA_DIR = path.resolve("./data");
 const PLAYER_STORE_PATH = path.join(DATA_DIR, "player-progress.json");
 
-// Util
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const rand = (a, b) => a + Math.random() * (b - a);
 const dist2 = (ax, ay, bx, by) => {
@@ -37,13 +34,15 @@ const dist2 = (ax, ay, bx, by) => {
 };
 
 function radiusFromMass(mass) {
-  // croissance douce, évite les énormes discontinuités
   return BASE_RADIUS + Math.sqrt(mass) * 1.6;
 }
 
 function speedFromMass(mass) {
-  // plus tu es gros, plus tu es lent
   return SPEED / (1 + Math.sqrt(mass) * 0.09);
+}
+
+function cryptoRandomId() {
+  return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
 }
 
 function makeFood() {
@@ -58,20 +57,40 @@ function makeFood() {
   };
 }
 
-function cryptoRandomId() {
-  // fallback sans crypto web (node ok)
-  return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+function pickSpawnPoint() {
+  if (!players.size) {
+    return { x: rand(-WORLD_W / 2, WORLD_W / 2), y: rand(-WORLD_H / 2, WORLD_H / 2) };
+  }
+
+  let best = null;
+  for (let i = 0; i < 36; i++) {
+    const candidate = {
+      x: rand(-WORLD_W / 2, WORLD_W / 2),
+      y: rand(-WORLD_H / 2, WORLD_H / 2)
+    };
+
+    let score = 0;
+    for (const p of players.values()) {
+      const d2 = dist2(candidate.x, candidate.y, p.x, p.y);
+      if (d2 < 1) {
+        score += 999999;
+        continue;
+      }
+      score += (1 + Math.sqrt(p.mass)) / Math.sqrt(d2);
+    }
+
+    if (!best || score < best.score) {
+      best = { ...candidate, score };
+    }
+  }
+
+  return { x: best.x, y: best.y };
 }
 
 const wss = new WebSocketServer({ port: PORT });
-
-/**
- * players: id -> {
- *   id, accountId, name, avatar, x,y, vx,vy, mass, xp, input {dx,dy}
- * }
- */
 const players = new Map();
-const sockets = new Map(); // ws -> playerId
+const sockets = new Map();
+const playerSocketById = new Map();
 const progressByAccount = new Map();
 let saveTimer = null;
 
@@ -88,7 +107,6 @@ async function loadProgress() {
       if (!record || typeof record !== "object") continue;
       progressByAccount.set(accountId, {
         xp: Math.max(0, Number(record.xp) || 0),
-        mass: Math.max(START_MASS, Number(record.mass) || START_MASS),
         name: typeof record.name === "string" ? record.name.slice(0, 20) : "",
         avatar: typeof record.avatar === "string" ? record.avatar.slice(0, 400) : "",
         updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : new Date().toISOString()
@@ -106,9 +124,7 @@ async function loadProgress() {
 
 async function flushProgressToDisk() {
   const output = {};
-  for (const [accountId, record] of progressByAccount.entries()) {
-    output[accountId] = record;
-  }
+  for (const [accountId, record] of progressByAccount.entries()) output[accountId] = record;
 
   try {
     await mkdir(DATA_DIR, { recursive: true });
@@ -126,30 +142,76 @@ function scheduleProgressSave() {
   }, 1500);
 }
 
-function persistPlayerProgress(player) {
-  if (!player?.accountId) return;
+function getOrCreateProgress(accountId, name = "", avatar = "") {
+  const safeId = accountId || "";
+  if (!safeId) return { xp: 0, name, avatar };
 
-  progressByAccount.set(player.accountId, {
-    xp: Math.max(0, Math.floor(player.xp || 0)),
-    mass: Math.max(START_MASS, Number(player.mass) || START_MASS),
-    name: typeof player.name === "string" ? player.name.slice(0, 20) : "",
-    avatar: typeof player.avatar === "string" ? player.avatar.slice(0, 400) : "",
+  let progress = progressByAccount.get(safeId);
+  if (!progress) {
+    progress = {
+      xp: 0,
+      name: name.slice(0, 20),
+      avatar: avatar.slice(0, 400),
+      updatedAt: new Date().toISOString()
+    };
+    progressByAccount.set(safeId, progress);
+    scheduleProgressSave();
+  }
+  return progress;
+}
+
+function sendToSocket(ws, payload) {
+  if (ws?.readyState === 1) ws.send(JSON.stringify(payload));
+}
+
+function upsertProgress(accountId, patch) {
+  if (!accountId) return;
+  const current = getOrCreateProgress(accountId);
+  progressByAccount.set(accountId, {
+    xp: Math.max(0, Number(patch.xp ?? current.xp) || 0),
+    name: typeof patch.name === "string" ? patch.name.slice(0, 20) : current.name,
+    avatar: typeof patch.avatar === "string" ? patch.avatar.slice(0, 400) : current.avatar,
     updatedAt: new Date().toISOString()
   });
-
   scheduleProgressSave();
 }
 
-function applySavedProgress(player) {
-  const saved = progressByAccount.get(player.accountId);
-  if (!saved) return;
+function awardGlobalXpAndRemove(playerId, reason) {
+  const player = players.get(playerId);
+  if (!player) return;
 
-  player.xp = Math.max(0, Number(saved.xp) || 0);
-  player.mass = Math.max(START_MASS, Number(saved.mass) || START_MASS);
+  const earnedXp = Math.max(0, Math.floor(player.sessionMassGained * MASS_TO_GLOBAL_XP_RATE));
+  const progress = getOrCreateProgress(player.accountId, player.name, player.avatar);
+  const totalXp = progress.xp + earnedXp;
+
+  upsertProgress(player.accountId, {
+    xp: totalXp,
+    name: player.name,
+    avatar: player.avatar
+  });
+
+  const ws = playerSocketById.get(playerId);
+  sendToSocket(ws, {
+    type: "run_end",
+    reason,
+    earnedXp,
+    totalXp
+  });
+
+  players.delete(playerId);
+  playerSocketById.delete(playerId);
+}
+
+function statusForClient() {
+  return {
+    type: "status",
+    inGame: players.size > 0,
+    connectedPlayers: players.size,
+    maxPlayers: MAX_PLAYERS
+  };
 }
 
 function snapshotForClient() {
-  // Snapshot volontairement simple (pas opti)
   const ps = [];
   for (const p of players.values()) {
     ps.push({
@@ -159,15 +221,22 @@ function snapshotForClient() {
       avatar: p.avatar,
       x: p.x,
       y: p.y,
-      mass: p.mass,
-      xp: p.xp
+      mass: p.mass
     });
   }
+
+  const top = [...players.values()]
+    .sort((a, b) => b.mass - a.mass)
+    .slice(0, 10)
+    .map((p, index) => ({ rank: index + 1, id: p.id, name: p.name, mass: Math.floor(p.mass) }));
+
   return {
+    type: "state",
     t: Date.now(),
     world: { w: WORLD_W, h: WORLD_H },
     players: ps,
-    foods
+    foods,
+    top
   };
 }
 
@@ -178,8 +247,17 @@ function broadcast(obj) {
   }
 }
 
+function removePlayerForSocket(ws, reason = "left") {
+  const pid = sockets.get(ws);
+  sockets.delete(ws);
+  if (!pid) return;
+  awardGlobalXpAndRemove(pid, reason);
+}
+
 wss.on("connection", (ws) => {
-  ws.send(JSON.stringify({ type: "hello", msg: "stellumin-server" }));
+  sendToSocket(ws, { type: "hello", msg: "stellumin-server" });
+  sendToSocket(ws, statusForClient());
+  sendToSocket(ws, snapshotForClient());
 
   ws.on("message", (raw) => {
     let msg;
@@ -189,32 +267,67 @@ wss.on("connection", (ws) => {
       return;
     }
 
+    if (msg.type === "progress_request") {
+      const twitchId = typeof msg.twitchId === "string" ? msg.twitchId.slice(0, 64) : "";
+      const name = typeof msg.name === "string" ? msg.name.slice(0, 20) : "";
+      const avatar = typeof msg.avatar === "string" ? msg.avatar.slice(0, 400) : "";
+      if (!twitchId) {
+        sendToSocket(ws, { type: "progress", xp: 0 });
+        return;
+      }
+      const progress = getOrCreateProgress(twitchId, name, avatar);
+      if (name || avatar) {
+        upsertProgress(twitchId, {
+          xp: progress.xp,
+          name: name || progress.name,
+          avatar: avatar || progress.avatar
+        });
+      }
+      sendToSocket(ws, { type: "progress", xp: progress.xp });
+      return;
+    }
+
     if (msg.type === "join") {
+      if (sockets.has(ws)) return;
+      if (players.size >= MAX_PLAYERS) {
+        sendToSocket(ws, { type: "join_rejected", reason: "server_full", maxPlayers: MAX_PLAYERS });
+        return;
+      }
+
       const id = cryptoRandomId();
       const name = typeof msg.name === "string" ? msg.name.slice(0, 20) : "Player";
       const avatar = typeof msg.avatar === "string" ? msg.avatar.slice(0, 400) : "";
       const twitchId = typeof msg.twitchId === "string" ? msg.twitchId.slice(0, 64) : "";
+      const spawn = pickSpawnPoint();
 
       const p = {
         id,
         accountId: twitchId || id,
         name,
         avatar,
-        x: rand(-500, 500),
-        y: rand(-500, 500),
+        x: spawn.x,
+        y: spawn.y,
         vx: 0,
         vy: 0,
         mass: START_MASS,
-        xp: 0,
+        sessionMassGained: 0,
         input: { dx: 0, dy: 0 }
       };
 
-      applySavedProgress(p);
-
       players.set(id, p);
       sockets.set(ws, id);
+      playerSocketById.set(id, ws);
 
-      ws.send(JSON.stringify({ type: "joined", id }));
+      upsertProgress(p.accountId, { name: p.name, avatar: p.avatar });
+
+      sendToSocket(ws, { type: "joined", id, startMass: START_MASS });
+      broadcast(statusForClient());
+      return;
+    }
+
+    if (msg.type === "leave") {
+      removePlayerForSocket(ws, "left");
+      broadcast(statusForClient());
       return;
     }
 
@@ -224,62 +337,82 @@ wss.on("connection", (ws) => {
       const p = players.get(pid);
       if (!p) return;
 
-      // dx, dy dans [-1, 1]
-      const dx = clamp(Number(msg.dx) || 0, -1, 1);
-      const dy = clamp(Number(msg.dy) || 0, -1, 1);
-      p.input.dx = dx;
-      p.input.dy = dy;
-      return;
+      p.input.dx = clamp(Number(msg.dx) || 0, -1, 1);
+      p.input.dy = clamp(Number(msg.dy) || 0, -1, 1);
     }
   });
 
   ws.on("close", () => {
-    const pid = sockets.get(ws);
-    sockets.delete(ws);
-    if (!pid) return;
-
-    const player = players.get(pid);
-    if (player) {
-      persistPlayerProgress(player);
-      players.delete(pid);
-    }
+    removePlayerForSocket(ws, "left");
+    broadcast(statusForClient());
   });
 });
 
-// Simulation
 setInterval(() => {
-  // maintenir la nourriture
+  if (players.size === 0) {
+    broadcast(statusForClient());
+    return;
+  }
+
   while (foods.length < FOOD_TARGET) foods.push(makeFood());
 
-  // update joueurs
   for (const p of players.values()) {
     const sp = speedFromMass(p.mass);
-
-    // accélération vers input
     p.vx = p.vx * DRAG + p.input.dx * sp * (1 - DRAG);
     p.vy = p.vy * DRAG + p.input.dy * sp * (1 - DRAG);
 
     p.x += p.vx * DT;
     p.y += p.vy * DT;
 
-    // limites monde
     p.x = clamp(p.x, -WORLD_W / 2, WORLD_W / 2);
     p.y = clamp(p.y, -WORLD_H / 2, WORLD_H / 2);
 
-    // collisions nourriture (simple O(n))
     const pr = radiusFromMass(p.mass);
     for (let i = foods.length - 1; i >= 0; i--) {
       const f = foods[i];
       if (dist2(p.x, p.y, f.x, f.y) <= (pr + f.r) * (pr + f.r)) {
         foods.splice(i, 1);
         p.mass += f.mass;
-        p.xp += f.mass; // XP = masse ramassée
-        persistPlayerProgress(p);
+        p.sessionMassGained += f.mass;
       }
     }
   }
 
-  broadcast({ type: "state", ...snapshotForClient() });
+  const deaths = new Set();
+  const allPlayers = [...players.values()];
+  for (let i = 0; i < allPlayers.length; i++) {
+    const a = allPlayers[i];
+    if (!players.has(a.id) || deaths.has(a.id)) continue;
+
+    for (let j = i + 1; j < allPlayers.length; j++) {
+      const b = allPlayers[j];
+      if (!players.has(b.id) || deaths.has(b.id)) continue;
+
+      const ar = radiusFromMass(a.mass);
+      const br = radiusFromMass(b.mass);
+      const d2 = dist2(a.x, a.y, b.x, b.y);
+      const eatDistance = Math.max(ar, br) * 0.8;
+
+      if (d2 > eatDistance * eatDistance) continue;
+
+      if (a.mass > b.mass * 1.12) {
+        a.mass += b.mass * 0.72;
+        a.sessionMassGained += b.mass * 0.5;
+        deaths.add(b.id);
+      } else if (b.mass > a.mass * 1.12) {
+        b.mass += a.mass * 0.72;
+        b.sessionMassGained += a.mass * 0.5;
+        deaths.add(a.id);
+      }
+    }
+  }
+
+  for (const id of deaths) {
+    awardGlobalXpAndRemove(id, "eaten");
+  }
+
+  broadcast(statusForClient());
+  broadcast(snapshotForClient());
 }, 1000 / TICK_HZ);
 
 await loadProgress();

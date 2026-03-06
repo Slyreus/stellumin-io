@@ -8,13 +8,12 @@
 </head>
 <body>
   <div id="app">
-    <!-- HUD -->
     <header class="hud">
       <div class="brand">
         <div class="logo">✦</div>
         <div>
           <div class="title">Stellumin.io</div>
-          <div class="subtitle">Collecte → masse → XP</div>
+          <div class="subtitle">Masse stellaire · Top 10 en direct</div>
         </div>
       </div>
 
@@ -26,32 +25,55 @@
             <span id="pseudoLabel" class="value">—</span>
           </div>
           <div class="line">
-            <span class="label">Niveau</span>
-            <span id="levelLabel" class="value">1</span>
+            <span class="label">Masse stellaire</span>
+            <span id="massLabel" class="value">0</span>
           </div>
-          <div class="xpbar">
-            <div class="xpbarFill" id="xpFill"></div>
-          </div>
-          <div class="xptext" id="xpText">XP: 0 / 50</div>
         </div>
       </div>
+
+      <aside class="top10Hud">
+        <div class="topTitle">Top 10</div>
+        <ol id="top10List"></ol>
+      </aside>
+
+      <button id="quitBtn" class="quitBtn">Quitter</button>
     </header>
 
-    <!-- Canvas -->
     <canvas id="game"></canvas>
 
-    <!-- Menu -->
     <div id="menu" class="menu">
       <div class="menuCard">
         <div class="menuTitle">Stellumin.io</div>
-        <p class="menuPitch">
-          Récupère de la poussière d'étoile pour devenir l'étoile la plus brillante de la galaxie.
-        </p>
+
+        <div class="menuProfile">
+          <img id="menuAvatar" class="avatar" alt="avatar" />
+          <div>
+            <div class="menuPseudoLabel">Pilote stellaire</div>
+            <div id="menuPseudo" class="menuPseudo">—</div>
+          </div>
+        </div>
+
+        <div class="xpbar menuXpBar">
+          <div class="xpbarFill" id="menuXpFill"></div>
+        </div>
+        <div id="menuXpText" class="xptext">EXP globale · Niveau 1 · 0 / 50</div>
+
+        <div id="gameStatus" class="gameStatus">Aucune partie en cours · En attente du premier joueur</div>
+
+        <div class="menuTopWrap">
+          <div class="topTitle">Top 10 en cours</div>
+          <ol id="menuLeaderboard"></ol>
+        </div>
+
         <button id="twitchBtn" class="twitchBtn">Se connecter avec Twitch</button>
         <div id="authStatus" class="authStatus">Non connecté à Twitch.</div>
-        <button id="playBtn" class="playBtn">Jouer</button>
-        <div class="hint">Déplace-toi avec la souris (ou trackpad). Ton pseudo/photo/ID Twitch servent à charger ta progression cosmique.</div>
+        <button id="playBtn" class="playBtn">Rejoindre la partie</button>
       </div>
+    </div>
+
+    <div id="xpAnim" class="xpAnim">
+      <div class="xpAnimDust">✦ ✦ ✦</div>
+      <div id="xpAnimAmount" class="xpAnimAmount">+0 EXP</div>
     </div>
   </div>
 
