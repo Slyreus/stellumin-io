@@ -46,7 +46,7 @@ canvas{ display:block; width:100vw; height:100vh; }
   align-items:stretch;
   min-width:230px;
   max-width:260px;
-  background:linear-gradient(140deg, rgba(36,20,70,.56), rgba(24,14,44,.56));
+  background:linear-gradient(140deg, rgba(36,20,70,.52), rgba(24,14,44,.52));
 }
 .top10Hud ol{
   list-style:none;
@@ -89,7 +89,7 @@ canvas{ display:block; width:100vw; height:100vh; }
 .quitBtn{
   position:fixed;
   right:16px;
-  bottom:14px;
+  bottom:16px;
   pointer-events:auto;
   border:1px solid rgba(255,120,120,.55);
   background:rgba(90,20,36,.5);

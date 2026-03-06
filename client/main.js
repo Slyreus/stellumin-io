@@ -404,16 +404,16 @@ function showMenu() {
   myId = null;
   menu.style.display = "grid";
   quitBtn.style.display = "none";
-  hudTop10.style.display = "none";
   hudProfile.style.display = "none";
+  hudTop10.style.display = "none";
 }
 
 function hideMenu() {
   inGame = true;
   menu.style.display = "none";
-  quitBtn.style.display = "inline-flex";
-  hudTop10.style.display = "flex";
+  quitBtn.style.display = "block";
   hudProfile.style.display = "flex";
+  hudTop10.style.display = "flex";
 }
 
 function connectLobby(serverUrl) {
