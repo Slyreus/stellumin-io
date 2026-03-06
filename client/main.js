@@ -16,6 +16,8 @@ const levelLabel = $("levelLabel");
 
 const TWITCH_CLIENT_ID = "qjt85uubxukx6b0woq20r63sfermgz";
 const TWITCH_REDIRECT_URI = `${window.location.origin}${window.location.pathname}`;
+// GitHub Pages = client statique (pas de secret serveur), on privilégie le flow implicite.
+// Hors GitHub Pages, on utilise PKCE (Authorization Code + code_challenge).
 const TWITCH_USE_IMPLICIT_FLOW = window.location.hostname.endsWith("github.io");
 const TWITCH_STATE_KEY = "stellumin_twitch_state";
 const TWITCH_CODE_VERIFIER_KEY = "stellumin_twitch_code_verifier";
@@ -85,6 +87,17 @@ async function createCodeChallenge(verifier) {
   return toBase64Url(new Uint8Array(digest));
 }
 
+async function parseTwitchError(response) {
+  try {
+    const payload = await response.json();
+    const message = payload?.message || payload?.error_description || payload?.error;
+    if (message) return `${response.status}: ${message}`;
+  } catch (_) {
+    // ignore JSON parse failures
+  }
+  return `${response.status}: ${response.statusText || "erreur inconnue"}`;
+}
+
 function updateAuthStatus(profile) {
   if (!profile) {
     authStatus.textContent = "Non connecté à Twitch.";
@@ -115,12 +128,13 @@ async function fetchTwitchUser(accessToken) {
   const response = await fetch("https://api.twitch.tv/helix/users", {
     headers: {
       Authorization: `Bearer ${accessToken}`,
-      "Client-Id": TWITCH_CLIENT_ID
+      "Client-ID": TWITCH_CLIENT_ID
     }
   });
 
   if (!response.ok) {
-    throw new Error(`Impossible de récupérer le profil Twitch (${response.status}).`);
+    const details = await parseTwitchError(response);
+    throw new Error(`Impossible de récupérer le profil Twitch (${details}).`);
   }
 
   const json = await response.json();
@@ -150,7 +164,8 @@ async function exchangeCodeForToken(code, verifier) {
   });
 
   if (!response.ok) {
-    throw new Error(`Échange du code Twitch impossible (${response.status}).`);
+    const details = await parseTwitchError(response);
+    throw new Error(`Échange du code Twitch impossible (${details}).`);
   }
 
   const json = await response.json();
@@ -182,7 +197,15 @@ async function maybeHandleTwitchRedirect() {
   const token = hashParams.get("access_token");
   const stateValue = queryParams.get("state") || hashParams.get("state");
 
-  if (!code && !token) return { handled: false, success: false };
+  if (!code && !token) {
+    if (expectedState) {
+      authStatus.textContent = "Connexion Twitch incomplète: aucun token/code reçu. Vérifie l'application Twitch (redirect URI + OAuth Authorization Code + PKCE).";
+      sessionStorage.removeItem(TWITCH_STATE_KEY);
+      sessionStorage.removeItem(TWITCH_CODE_VERIFIER_KEY);
+      return { handled: true, success: false };
+    }
+    return { handled: false, success: false };
+  }
 
   sessionStorage.removeItem(TWITCH_STATE_KEY);
 
@@ -216,7 +239,8 @@ async function maybeHandleTwitchRedirect() {
     return { handled: true, success: true };
   } catch (err) {
     console.error(err);
-    authStatus.textContent = "Erreur Twitch: impossible de charger le profil.";
+    const reason = err instanceof Error ? err.message : String(err);
+    authStatus.textContent = `Erreur Twitch: ${reason}`;
     return { handled: true, success: false };
   } finally {
     window.history.replaceState({}, document.title, TWITCH_REDIRECT_URI);
