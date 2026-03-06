@@ -12,7 +12,8 @@ const menuPseudo = $("menuPseudo");
 const menuXpFill = $("menuXpFill");
 const menuXpText = $("menuXpText");
 const gameStatus = $("gameStatus");
-const menuLeaderboard = $("menuLeaderboard");
+const hudProfile = $("hudProfile");
+const hudTop10 = $("hudTop10");
 
 const pseudoLabel = $("pseudoLabel");
 const avatarImg = $("avatar");
@@ -42,6 +43,12 @@ let inGame = false;
 let animationHandle = null;
 let latestTop = [];
 let statusState = { inGame: false, connectedPlayers: 0, maxPlayers: 30 };
+let eliminationState = null;
+const avatarVisualCache = new Map();
+const avatarColorProbe = document.createElement("canvas");
+avatarColorProbe.width = 20;
+avatarColorProbe.height = 20;
+const avatarColorCtx = avatarColorProbe.getContext("2d", { willReadFrequently: true });
 
 let state = {
   players: [],
@@ -122,11 +129,13 @@ function getDefaultAvatarDataUrl() {
 function updateAuthStatus(profile) {
   if (!profile) {
     authStatus.textContent = "Non connecté à Twitch.";
+    twitchBtn.textContent = "Se connecter avec Twitch";
     playBtn.disabled = true;
     return;
   }
 
   authStatus.textContent = `Connecté en tant que ${profile.login} (ID: ${profile.id})`;
+  twitchBtn.textContent = "Se déconnecter de Twitch";
   playBtn.disabled = false;
 }
 
@@ -378,14 +387,13 @@ function renderStatus() {
     : "Aucune partie en cours · En attente du premier joueur";
 }
 
-function renderTopMenuAndHud() {
+function renderTopHud() {
   const entries = latestTop.slice(0, 10);
   const markup = entries.length
     ? entries.map((row) => `<li><span>#${row.rank} ${row.name}</span><strong>${row.mass}</strong></li>`).join("")
     : "<li><span>Aucun joueur actif</span><strong>—</strong></li>";
 
   top10List.innerHTML = markup;
-  menuLeaderboard.innerHTML = markup;
 }
 
 function hydrateProfile(profile) {
@@ -399,13 +407,21 @@ function hydrateProfile(profile) {
 
 function showMenu() {
   inGame = false;
+  eliminationState = null;
   myId = null;
   menu.style.display = "grid";
+  quitBtn.style.display = "none";
+  hudProfile.style.display = "none";
+  hudTop10.style.display = "none";
 }
 
 function hideMenu() {
   inGame = true;
+  eliminationState = null;
   menu.style.display = "none";
+  quitBtn.style.display = "block";
+  hudProfile.style.display = "flex";
+  hudTop10.style.display = "flex";
 }
 
 function connectLobby(serverUrl) {
@@ -450,6 +466,18 @@ function connectLobby(serverUrl) {
       return;
     }
 
+    if (msg.type === "eliminated") {
+      eliminationState = {
+        active: true,
+        startedAt: Date.now(),
+        durationMs: Math.max(500, Number(msg.durationMs) || 5000),
+        camX: Number(msg.camera?.x) || 0,
+        camY: Number(msg.camera?.y) || 0
+      };
+      myId = null;
+      return;
+    }
+
     if (msg.type === "run_end") {
       showMenu();
       animateXpGain(msg.earnedXp || 0, msg.totalXp || myLocal.globalXp);
@@ -462,7 +490,7 @@ function connectLobby(serverUrl) {
       state.world = msg.world || state.world;
       latestTop = msg.top || [];
 
-      renderTopMenuAndHud();
+      renderTopHud();
       renderHud();
     }
   });
@@ -519,7 +547,7 @@ function animateXpGain(amount, totalAfter) {
   if (!gain) return;
   xpAnimAmount.textContent = `+${gain} EXP`;
   xpAnim.classList.add("show");
-  setTimeout(() => xpAnim.classList.remove("show"), 1650);
+  setTimeout(() => xpAnim.classList.remove("show"), 2600);
 }
 
 let input = { dx: 0, dy: 0 };
@@ -632,11 +660,154 @@ function drawBoundaryWarning(me, r) {
   }
 }
 
-function draw() {
-  const me = getMe();
-  const camX = me ? me.x : 0;
-  const camY = me ? me.y : 0;
+function hashColorFromString(text = "") {
+  let hash = 0;
+  for (let i = 0; i < text.length; i++) hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
+  const hue = hash % 360;
+  return { r: 170 + Math.floor((hue % 40) * 2), g: 120 + (hue % 90), b: 180 + (hue % 70) };
+}
 
+function getAvatarVisual(avatarUrl) {
+  const key = avatarUrl || "__default__";
+  if (avatarVisualCache.has(key)) return avatarVisualCache.get(key);
+
+  const fallbackColor = hashColorFromString(key);
+  const visual = { img: null, color: fallbackColor, ready: !avatarUrl };
+  avatarVisualCache.set(key, visual);
+
+  if (!avatarUrl) return visual;
+
+  const img = new Image();
+  img.crossOrigin = "anonymous";
+  img.onload = () => {
+    visual.img = img;
+    if (!avatarColorCtx) {
+      visual.ready = true;
+      return;
+    }
+
+    avatarColorCtx.clearRect(0, 0, avatarColorProbe.width, avatarColorProbe.height);
+    avatarColorCtx.drawImage(img, 0, 0, avatarColorProbe.width, avatarColorProbe.height);
+    const pixels = avatarColorCtx.getImageData(0, 0, avatarColorProbe.width, avatarColorProbe.height).data;
+
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    let count = 0;
+    for (let i = 0; i < pixels.length; i += 4) {
+      const alpha = pixels[i + 3] / 255;
+      if (alpha < 0.2) continue;
+      r += pixels[i] * alpha;
+      g += pixels[i + 1] * alpha;
+      b += pixels[i + 2] * alpha;
+      count += alpha;
+    }
+
+    if (count > 0) {
+      visual.color = {
+        r: Math.floor(r / count),
+        g: Math.floor(g / count),
+        b: Math.floor(b / count)
+      };
+    }
+    visual.ready = true;
+  };
+  img.onerror = () => {
+    visual.ready = true;
+  };
+  img.src = avatarUrl;
+
+  return visual;
+}
+
+function drawPlayerFlameAura(player, r, color) {
+  const pulse = 0.78 + 0.22 * Math.sin(Date.now() * 0.01 + player.mass * 0.02);
+  const outerRadius = r * 1.65 * pulse;
+  const grad = ctx.createRadialGradient(player.x, player.y, r * 0.6, player.x, player.y, outerRadius);
+  grad.addColorStop(0, `rgba(${color.r}, ${color.g}, ${color.b}, 0.34)`);
+  grad.addColorStop(0.62, `rgba(${color.r}, ${color.g}, ${color.b}, 0.16)`);
+  grad.addColorStop(1, `rgba(${color.r}, ${color.g}, ${color.b}, 0)`);
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(player.x, player.y, outerRadius, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = `rgba(${Math.min(255, color.r + 40)}, ${Math.min(255, color.g + 40)}, ${Math.min(255, color.b + 40)}, 0.42)`;
+  ctx.lineWidth = 2.2;
+  ctx.beginPath();
+  const spikes = 22;
+  for (let i = 0; i <= spikes; i++) {
+    const t = (i / spikes) * Math.PI * 2;
+    const wave = 1 + 0.12 * Math.sin(Date.now() * 0.01 + i * 0.7 + player.mass * 0.05);
+    const rr = r * (1.05 + 0.16 * wave);
+    const x = player.x + Math.cos(t) * rr;
+    const y = player.y + Math.sin(t) * rr;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.stroke();
+}
+
+function drawPlayerCore(player, r) {
+  const visual = getAvatarVisual(player.avatar);
+  const color = visual.color;
+
+  drawPlayerFlameAura(player, r, color);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(player.x, player.y, r, 0, Math.PI * 2);
+  ctx.clip();
+
+  if (visual.img && visual.img.complete) {
+    ctx.drawImage(visual.img, player.x - r, player.y - r, r * 2, r * 2);
+  } else {
+    const fallback = ctx.createLinearGradient(player.x - r, player.y - r, player.x + r, player.y + r);
+    fallback.addColorStop(0, `rgba(${Math.min(255, color.r + 35)}, ${Math.min(255, color.g + 35)}, ${Math.min(255, color.b + 35)}, 0.95)`);
+    fallback.addColorStop(1, `rgba(${Math.max(0, color.r - 25)}, ${Math.max(0, color.g - 25)}, ${Math.max(0, color.b - 25)}, 0.95)`);
+    ctx.fillStyle = fallback;
+    ctx.fillRect(player.x - r, player.y - r, r * 2, r * 2);
+  }
+
+  const shine = ctx.createRadialGradient(player.x - r * 0.35, player.y - r * 0.45, r * 0.1, player.x, player.y, r * 1.1);
+  shine.addColorStop(0, "rgba(255,255,255,0.33)");
+  shine.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = shine;
+  ctx.fillRect(player.x - r, player.y - r, r * 2, r * 2);
+  ctx.restore();
+
+  ctx.lineWidth = 2.3;
+  ctx.strokeStyle = "rgba(255,255,255,0.48)";
+  ctx.beginPath();
+  ctx.arc(player.x, player.y, r, 0, Math.PI * 2);
+  ctx.stroke();
+}
+
+function getCameraPose() {
+  const me = getMe();
+  if (!eliminationState || !eliminationState.active) {
+    return {
+      camX: me ? me.x : 0,
+      camY: me ? me.y : 0,
+      scale: 1
+    };
+  }
+
+  const elapsed = Date.now() - eliminationState.startedAt;
+  const t = Math.min(1, elapsed / eliminationState.durationMs);
+  const ease = t * t * (3 - 2 * t);
+
+  return {
+    camX: eliminationState.camX,
+    camY: eliminationState.camY,
+    scale: 1 - 0.52 * ease
+  };
+}
+
+
+function draw() {
+  const { camX, camY, scale } = getCameraPose();
   drawBackground(camX, camY);
 
   if (!inGame) {
@@ -646,6 +817,7 @@ function draw() {
 
   ctx.save();
   ctx.translate(window.innerWidth / 2, window.innerHeight / 2);
+  ctx.scale(scale, scale);
   ctx.translate(-camX, -camY);
 
   for (const f of state.foods) {
@@ -655,26 +827,17 @@ function draw() {
     drawDustStar(f.x, f.y, size, color);
   }
 
+  const me = getMe();
   for (const p of state.players) {
     const r = radiusFromMass(p.mass);
+    drawPlayerCore(p, r);
 
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-    ctx.fillStyle = p.id === myId ? "rgba(232,240,255,0.95)" : "rgba(220,230,255,0.65)";
-    ctx.fill();
-
-    const ring = ctx.createRadialGradient(p.x, p.y, r * 0.25, p.x, p.y, r);
-    ring.addColorStop(0, "rgba(255,255,255,0.18)");
-    ring.addColorStop(1, "rgba(145,170,255,0.03)");
-    ctx.fillStyle = ring;
-    ctx.fill();
-
-    ctx.font = `${Math.max(10, Math.min(20, r * 0.45))}px system-ui`;
+    ctx.font = `${Math.max(10, Math.min(20, r * 0.4))}px system-ui`;
     ctx.textAlign = "center";
-    ctx.fillStyle = "rgba(10,18,35,0.85)";
-    ctx.fillText(p.name, p.x, p.y + 4);
+    ctx.fillStyle = "rgba(8, 12, 24, 0.88)";
+    ctx.fillText(p.name, p.x, p.y + r + 16);
 
-    if (p.id === myId) drawBoundaryWarning(p, r);
+    if (me && p.id === me.id) drawBoundaryWarning(p, r);
   }
 
   ctx.restore();
@@ -682,6 +845,23 @@ function draw() {
 }
 
 twitchBtn.addEventListener("click", () => {
+  const profile = getSavedTwitchProfile();
+  if (profile) {
+    localStorage.removeItem(TWITCH_STORAGE_KEYS.id);
+    localStorage.removeItem(TWITCH_STORAGE_KEYS.login);
+    localStorage.removeItem(TWITCH_STORAGE_KEYS.avatar);
+    myLocal = {
+      name: "Player",
+      avatar: "",
+      twitchId: "",
+      globalXp: 0
+    };
+    updateAuthStatus(null);
+    renderMenuProfile();
+    renderHud();
+    return;
+  }
+
   startTwitchAuth().catch((err) => {
     console.error(err);
     authStatus.textContent = "Erreur Twitch: impossible de démarrer la connexion.";
@@ -716,8 +896,9 @@ quitBtn.addEventListener("click", leaveGame);
     sendProgressRequest();
   }
 
+  showMenu();
   renderStatus();
-  renderTopMenuAndHud();
+  renderTopHud();
   if (!animationHandle) animationHandle = requestAnimationFrame(draw);
 
   if (!inputTimer) inputTimer = setInterval(sendInput, 50);
