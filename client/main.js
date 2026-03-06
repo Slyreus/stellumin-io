@@ -12,7 +12,8 @@ const menuPseudo = $("menuPseudo");
 const menuXpFill = $("menuXpFill");
 const menuXpText = $("menuXpText");
 const gameStatus = $("gameStatus");
-const menuLeaderboard = $("menuLeaderboard");
+const hudProfile = $("hudProfile");
+const hudTop10 = $("hudTop10");
 
 const pseudoLabel = $("pseudoLabel");
 const avatarImg = $("avatar");
@@ -122,11 +123,13 @@ function getDefaultAvatarDataUrl() {
 function updateAuthStatus(profile) {
   if (!profile) {
     authStatus.textContent = "Non connecté à Twitch.";
+    twitchBtn.textContent = "Se connecter avec Twitch";
     playBtn.disabled = true;
     return;
   }
 
   authStatus.textContent = `Connecté en tant que ${profile.login} (ID: ${profile.id})`;
+  twitchBtn.textContent = "Se déconnecter de Twitch";
   playBtn.disabled = false;
 }
 
@@ -378,14 +381,13 @@ function renderStatus() {
     : "Aucune partie en cours · En attente du premier joueur";
 }
 
-function renderTopMenuAndHud() {
+function renderTopHud() {
   const entries = latestTop.slice(0, 10);
   const markup = entries.length
     ? entries.map((row) => `<li><span>#${row.rank} ${row.name}</span><strong>${row.mass}</strong></li>`).join("")
     : "<li><span>Aucun joueur actif</span><strong>—</strong></li>";
 
   top10List.innerHTML = markup;
-  menuLeaderboard.innerHTML = markup;
 }
 
 function hydrateProfile(profile) {
@@ -401,11 +403,17 @@ function showMenu() {
   inGame = false;
   myId = null;
   menu.style.display = "grid";
+  quitBtn.style.display = "none";
+  hudProfile.style.display = "none";
+  hudTop10.style.display = "none";
 }
 
 function hideMenu() {
   inGame = true;
   menu.style.display = "none";
+  quitBtn.style.display = "block";
+  hudProfile.style.display = "flex";
+  hudTop10.style.display = "flex";
 }
 
 function connectLobby(serverUrl) {
@@ -462,7 +470,7 @@ function connectLobby(serverUrl) {
       state.world = msg.world || state.world;
       latestTop = msg.top || [];
 
-      renderTopMenuAndHud();
+      renderTopHud();
       renderHud();
     }
   });
@@ -682,6 +690,23 @@ function draw() {
 }
 
 twitchBtn.addEventListener("click", () => {
+  const profile = getSavedTwitchProfile();
+  if (profile) {
+    localStorage.removeItem(TWITCH_STORAGE_KEYS.id);
+    localStorage.removeItem(TWITCH_STORAGE_KEYS.login);
+    localStorage.removeItem(TWITCH_STORAGE_KEYS.avatar);
+    myLocal = {
+      name: "Player",
+      avatar: "",
+      twitchId: "",
+      globalXp: 0
+    };
+    updateAuthStatus(null);
+    renderMenuProfile();
+    renderHud();
+    return;
+  }
+
   startTwitchAuth().catch((err) => {
     console.error(err);
     authStatus.textContent = "Erreur Twitch: impossible de démarrer la connexion.";
@@ -716,8 +741,9 @@ quitBtn.addEventListener("click", leaveGame);
     sendProgressRequest();
   }
 
+  showMenu();
   renderStatus();
-  renderTopMenuAndHud();
+  renderTopHud();
   if (!animationHandle) animationHandle = requestAnimationFrame(draw);
 
   if (!inputTimer) inputTimer = setInterval(sendInput, 50);
