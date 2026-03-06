@@ -16,13 +16,10 @@ html,body{ height:100%; margin:0; background:var(--bg); color:var(--text); font-
 canvas{ display:block; width:100vw; height:100vh; }
 
 .hud{
-  position:fixed; inset:0 0 auto 0;
-  display:grid;
-  grid-template-columns:auto auto 1fr auto;
-  align-items:start;
-  gap:10px;
-  padding:14px 16px;
+  position:fixed;
+  inset:0;
   pointer-events:none;
+  padding:14px 16px;
 }
 .brand, .profile, .top10Hud{
   display:flex;
@@ -34,6 +31,12 @@ canvas{ display:block; width:100vw; height:100vh; }
   padding:10px 12px;
   backdrop-filter: blur(12px);
   box-shadow:0 0 22px rgba(143,88,255,.22);
+}
+.brand,
+.profile{
+  position:relative;
+  margin-right:10px;
+  display:inline-flex;
 }
 .top10Hud{
   position:fixed;
