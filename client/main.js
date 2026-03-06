@@ -7,18 +7,25 @@ const menu = $("menu");
 const playBtn = $("playBtn");
 const twitchBtn = $("twitchBtn");
 const authStatus = $("authStatus");
+const menuAvatar = $("menuAvatar");
+const menuPseudo = $("menuPseudo");
+const menuXpFill = $("menuXpFill");
+const menuXpText = $("menuXpText");
+const gameStatus = $("gameStatus");
+const menuLeaderboard = $("menuLeaderboard");
 
 const pseudoLabel = $("pseudoLabel");
 const avatarImg = $("avatar");
-const xpFill = $("xpFill");
-const xpText = $("xpText");
-const levelLabel = $("levelLabel");
+const massLabel = $("massLabel");
+const top10List = $("top10List");
+const quitBtn = $("quitBtn");
+
+const xpAnim = $("xpAnim");
+const xpAnimAmount = $("xpAnimAmount");
 
 const TWITCH_CLIENT_ID = "qjt85uubxukx6b0woq20r63sfermgz";
 const TWITCH_REDIRECT_URI = `${window.location.origin}${window.location.pathname}`;
 const TWITCH_SCOPES = ["user:read:email"];
-// GitHub Pages = client statique (pas de secret serveur), on privilégie le flow implicite.
-// Hors GitHub Pages, on utilise PKCE (Authorization Code + code_challenge).
 const TWITCH_USE_IMPLICIT_FLOW = window.location.hostname.endsWith("github.io");
 const TWITCH_STATE_KEY = "stellumin_twitch_state";
 const TWITCH_CODE_VERIFIER_KEY = "stellumin_twitch_code_verifier";
@@ -30,6 +37,11 @@ const TWITCH_STORAGE_KEYS = {
 
 let ws = null;
 let myId = null;
+let inputTimer = null;
+let inGame = false;
+let animationHandle = null;
+let latestTop = [];
+let statusState = { inGame: false, connectedPlayers: 0, maxPlayers: 30 };
 
 let state = {
   players: [],
@@ -41,8 +53,7 @@ let myLocal = {
   name: "Player",
   avatar: "",
   twitchId: "",
-  xp: 0,
-  level: 1
+  globalXp: 0
 };
 
 const WARNING_MARGIN = 300;
@@ -53,7 +64,6 @@ const backgroundStars = Array.from({ length: 260 }, () => ({
   glow: Math.random() * 0.55 + 0.2,
   drift: Math.random() * 0.35 + 0.65
 }));
-
 
 function getServerUrl() {
   const fromConfig = window.STELLUMIN_CONFIG?.WS_SERVER_URL;
@@ -97,6 +107,16 @@ async function parseTwitchError(response) {
     // ignore JSON parse failures
   }
   return `${response.status}: ${response.statusText || "erreur inconnue"}`;
+}
+
+function getDefaultAvatarDataUrl() {
+  return "data:image/svg+xml;utf8," + encodeURIComponent(`
+    <svg xmlns=\"http://www.w3.org/2000/svg\" width=\"96\" height=\"96\">
+      <rect width=\"100%\" height=\"100%\" fill=\"#111827\"/>
+      <circle cx=\"48\" cy=\"42\" r=\"18\" fill=\"#93c5fd\"/>
+      <rect x=\"22\" y=\"64\" width=\"52\" height=\"18\" rx=\"9\" fill=\"#1f2937\"/>
+    </svg>
+  `);
 }
 
 function updateAuthStatus(profile) {
@@ -234,7 +254,7 @@ async function maybeHandleTwitchRedirect() {
 
   if (!code && !token) {
     if (expectedState) {
-      authStatus.textContent = "Connexion Twitch incomplète: aucun token/code reçu. Vérifie l'application Twitch (redirect URI + OAuth Authorization Code + PKCE).";
+      authStatus.textContent = "Connexion Twitch incomplète: aucun token/code reçu.";
       sessionStorage.removeItem(TWITCH_STATE_KEY);
       sessionStorage.removeItem(TWITCH_CODE_VERIFIER_KEY);
       return { handled: true, success: false };
@@ -271,6 +291,8 @@ async function maybeHandleTwitchRedirect() {
     const profile = await fetchTwitchUser(accessToken);
     saveTwitchProfile(profile);
     updateAuthStatus(profile);
+    hydrateProfile(profile);
+    sendProgressRequest();
     return { handled: true, success: true };
   } catch (err) {
     console.error(err);
@@ -305,11 +327,10 @@ async function startTwitchAuth() {
   window.location.href = authUrl.toString();
 }
 
-// XP / niveaux : simple et réglable
 function xpForLevel(level) {
-  // à ajuster plus tard)
   return 50 + (level - 1) * 25;
 }
+
 function computeLevelFromXp(xp) {
   let lvl = 1;
   let remaining = xp;
@@ -329,61 +350,181 @@ function resize() {
 window.addEventListener("resize", resize);
 resize();
 
-function setHud(name, avatarUrl, xp) {
-  pseudoLabel.textContent = name || "—";
-  avatarImg.src = avatarUrl || "data:image/svg+xml;utf8," + encodeURIComponent(`
-    <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96">
-      <rect width="100%" height="100%" fill="#111827"/>
-      <circle cx="48" cy="42" r="18" fill="#93c5fd"/>
-      <rect x="22" y="64" width="52" height="18" rx="9" fill="#1f2937"/>
-    </svg>
-  `);
-
-  const { lvl, inLevelXp, next } = computeLevelFromXp(xp);
-  levelLabel.textContent = String(lvl);
-  xpText.textContent = `XP: ${inLevelXp} / ${next}`;
-  xpFill.style.width = `${Math.floor((inLevelXp / next) * 100)}%`;
+function renderGlobalProgress(xp) {
+  const safeXp = Math.max(0, Math.floor(Number(xp) || 0));
+  const { lvl, inLevelXp, next } = computeLevelFromXp(safeXp);
+  menuXpText.textContent = `EXP globale · Niveau ${lvl} · ${inLevelXp} / ${next}`;
+  menuXpFill.style.width = `${Math.floor((inLevelXp / next) * 100)}%`;
 }
 
-function connect(serverUrl, name, avatar, twitchId) {
+function renderMenuProfile() {
+  menuPseudo.textContent = myLocal.name || "—";
+  menuAvatar.src = myLocal.avatar || getDefaultAvatarDataUrl();
+  renderGlobalProgress(myLocal.globalXp);
+}
+
+function renderHud() {
+  pseudoLabel.textContent = myLocal.name || "—";
+  avatarImg.src = myLocal.avatar || getDefaultAvatarDataUrl();
+
+  const me = getMe();
+  massLabel.textContent = me ? `${Math.floor(me.mass)}` : "0";
+}
+
+function renderStatus() {
+  const { inGame: gameRunning, connectedPlayers, maxPlayers } = statusState;
+  gameStatus.textContent = gameRunning
+    ? `Partie en cours · ${connectedPlayers}/${maxPlayers} joueurs connectés`
+    : "Aucune partie en cours · En attente du premier joueur";
+}
+
+function renderTopMenuAndHud() {
+  const entries = latestTop.slice(0, 10);
+  const markup = entries.length
+    ? entries.map((row) => `<li><span>#${row.rank} ${row.name}</span><strong>${row.mass}</strong></li>`).join("")
+    : "<li><span>Aucun joueur actif</span><strong>—</strong></li>";
+
+  top10List.innerHTML = markup;
+  menuLeaderboard.innerHTML = markup;
+}
+
+function hydrateProfile(profile) {
+  if (!profile) return;
+  myLocal.name = profile.login;
+  myLocal.avatar = profile.avatar;
+  myLocal.twitchId = profile.id;
+  renderMenuProfile();
+  renderHud();
+}
+
+function showMenu() {
+  inGame = false;
+  myId = null;
+  menu.style.display = "grid";
+}
+
+function hideMenu() {
+  inGame = true;
+  menu.style.display = "none";
+}
+
+function connectLobby(serverUrl) {
   ws = new WebSocket(serverUrl);
 
   ws.addEventListener("open", () => {
-    ws.send(JSON.stringify({ type: "join", name, avatar, twitchId }));
+    const profile = getSavedTwitchProfile();
+    if (profile) {
+      hydrateProfile(profile);
+      sendProgressRequest();
+    }
   });
 
   ws.addEventListener("message", (ev) => {
     const msg = JSON.parse(ev.data);
 
+    if (msg.type === "status") {
+      statusState = {
+        inGame: !!msg.inGame,
+        connectedPlayers: Number(msg.connectedPlayers) || 0,
+        maxPlayers: Number(msg.maxPlayers) || 30
+      };
+      renderStatus();
+      return;
+    }
+
+    if (msg.type === "progress") {
+      myLocal.globalXp = Math.max(0, Number(msg.xp) || 0);
+      renderMenuProfile();
+      return;
+    }
+
+    if (msg.type === "join_rejected") {
+      authStatus.textContent = "Serveur plein (30 joueurs). Réessaie plus tard.";
+      showMenu();
+      return;
+    }
+
     if (msg.type === "joined") {
       myId = msg.id;
+      hideMenu();
+      return;
+    }
+
+    if (msg.type === "run_end") {
+      showMenu();
+      animateXpGain(msg.earnedXp || 0, msg.totalXp || myLocal.globalXp);
       return;
     }
 
     if (msg.type === "state") {
-      state.players = msg.players;
-      state.foods = msg.foods;
-      state.world = msg.world;
+      state.players = msg.players || [];
+      state.foods = msg.foods || [];
+      state.world = msg.world || state.world;
+      latestTop = msg.top || [];
 
-      const me = state.players.find(p => p.id === myId);
-      if (me) {
-        myLocal.xp = me.xp;
-        myLocal.name = me.name || myLocal.name;
-        myLocal.avatar = me.avatar || myLocal.avatar;
-        setHud(myLocal.name, myLocal.avatar, myLocal.xp);
-      }
+      renderTopMenuAndHud();
+      renderHud();
     }
   });
 
   ws.addEventListener("close", () => {
-    // ajouter un reconnect plus tard
-    console.warn("WS closed");
+    inGame = false;
+    myId = null;
+    renderStatus();
+    setTimeout(() => connectLobby(serverUrl), 1200);
   });
 }
 
-// Input : vecteur direction souris depuis le centre écran
+function sendProgressRequest() {
+  if (!ws || ws.readyState !== 1 || !myLocal.twitchId) return;
+  ws.send(JSON.stringify({
+    type: "progress_request",
+    twitchId: myLocal.twitchId,
+    name: myLocal.name,
+    avatar: myLocal.avatar
+  }));
+}
+
+function joinGame() {
+  if (!ws || ws.readyState !== 1) {
+    authStatus.textContent = "Connexion serveur indisponible.";
+    return;
+  }
+  if (!myLocal.twitchId) {
+    authStatus.textContent = "Connecte-toi d'abord avec Twitch.";
+    return;
+  }
+
+  ws.send(JSON.stringify({
+    type: "join",
+    name: myLocal.name,
+    avatar: myLocal.avatar,
+    twitchId: myLocal.twitchId
+  }));
+}
+
+function leaveGame() {
+  if (!ws || ws.readyState !== 1) {
+    showMenu();
+    return;
+  }
+  ws.send(JSON.stringify({ type: "leave" }));
+}
+
+function animateXpGain(amount, totalAfter) {
+  const gain = Math.max(0, Math.floor(Number(amount) || 0));
+  myLocal.globalXp = Math.max(0, Math.floor(Number(totalAfter) || 0));
+  renderMenuProfile();
+
+  if (!gain) return;
+  xpAnimAmount.textContent = `+${gain} EXP`;
+  xpAnim.classList.add("show");
+  setTimeout(() => xpAnim.classList.remove("show"), 1650);
+}
+
 let input = { dx: 0, dy: 0 };
 window.addEventListener("mousemove", (e) => {
+  if (!inGame) return;
   const cx = window.innerWidth / 2;
   const cy = window.innerHeight / 2;
   const vx = e.clientX - cx;
@@ -394,13 +535,12 @@ window.addEventListener("mousemove", (e) => {
 });
 
 function sendInput() {
-  if (!ws || ws.readyState !== 1) return;
+  if (!inGame || !ws || ws.readyState !== 1 || !myId) return;
   ws.send(JSON.stringify({ type: "input", dx: input.dx, dy: input.dy }));
 }
 
-// Caméra centrée sur moi
 function getMe() {
-  return state.players.find(p => p.id === myId) || null;
+  return state.players.find((p) => p.id === myId) || null;
 }
 
 function radiusFromMass(mass) {
@@ -499,12 +639,15 @@ function draw() {
 
   drawBackground(camX, camY);
 
-  // monde
+  if (!inGame) {
+    animationHandle = requestAnimationFrame(draw);
+    return;
+  }
+
   ctx.save();
   ctx.translate(window.innerWidth / 2, window.innerHeight / 2);
   ctx.translate(-camX, -camY);
 
-  // poussière d'étoile (nourriture)
   for (const f of state.foods) {
     const isRare = f.kind === "rare";
     const size = isRare ? f.r * 1.15 : f.r * 0.95;
@@ -512,11 +655,9 @@ function draw() {
     drawDustStar(f.x, f.y, size, color);
   }
 
-  // joueurs
   for (const p of state.players) {
     const r = radiusFromMass(p.mass);
 
-    // corps
     ctx.beginPath();
     ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
     ctx.fillStyle = p.id === myId ? "rgba(232,240,255,0.95)" : "rgba(220,230,255,0.65)";
@@ -528,7 +669,6 @@ function draw() {
     ctx.fillStyle = ring;
     ctx.fill();
 
-    // nom
     ctx.font = `${Math.max(10, Math.min(20, r * 0.45))}px system-ui`;
     ctx.textAlign = "center";
     ctx.fillStyle = "rgba(10,18,35,0.85)";
@@ -538,8 +678,7 @@ function draw() {
   }
 
   ctx.restore();
-
-  requestAnimationFrame(draw);
+  animationHandle = requestAnimationFrame(draw);
 }
 
 twitchBtn.addEventListener("click", () => {
@@ -556,26 +695,30 @@ playBtn.addEventListener("click", () => {
     return;
   }
 
-  myLocal.name = profile.login;
-  myLocal.avatar = profile.avatar;
-  myLocal.twitchId = profile.id;
-
-  // HUD initial
-  setHud(profile.login, profile.avatar, 0);
-
-  const serverUrl = getServerUrl();
-  connect(serverUrl, profile.login, profile.avatar, profile.id);
-
-  menu.style.display = "none";
-
-  // boucle input
-  setInterval(sendInput, 50);
-  requestAnimationFrame(draw);
+  hydrateProfile(profile);
+  joinGame();
 });
 
+quitBtn.addEventListener("click", leaveGame);
+
 (async () => {
+  const serverUrl = getServerUrl();
+  connectLobby(serverUrl);
+
   const authResult = await maybeHandleTwitchRedirect();
   if (authResult.handled && !authResult.success) return;
+
   const profile = getSavedTwitchProfile();
   updateAuthStatus(profile);
+  hydrateProfile(profile);
+
+  if (profile) {
+    sendProgressRequest();
+  }
+
+  renderStatus();
+  renderTopMenuAndHud();
+  if (!animationHandle) animationHandle = requestAnimationFrame(draw);
+
+  if (!inputTimer) inputTimer = setInterval(sendInput, 50);
 })();
