@@ -658,16 +658,28 @@ function tryUseAbility(abilityId) {
 }
 
 
-let input = { dx: 0, dy: 0 };
+let input = { dx: 0, dy: 0, mag: 0 };
 window.addEventListener("mousemove", (e) => {
   if (!inGame) return;
   const cx = window.innerWidth / 2;
   const cy = window.innerHeight / 2;
   const vx = e.clientX - cx;
   const vy = e.clientY - cy;
-  const len = Math.hypot(vx, vy) || 1;
-  input.dx = vx / len;
-  input.dy = vy / len;
+  const len = Math.hypot(vx, vy);
+
+  if (len <= 8) {
+    input.dx = 0;
+    input.dy = 0;
+    input.mag = 0;
+    return;
+  }
+
+  const norm = len || 1;
+  input.dx = vx / norm;
+  input.dy = vy / norm;
+
+  const maxReach = Math.min(window.innerWidth, window.innerHeight) * 0.44;
+  input.mag = Math.max(0, Math.min(1, len / maxReach));
 });
 
 window.addEventListener("wheel", (e) => {
@@ -687,7 +699,7 @@ window.addEventListener("keydown", (e) => {
 
 function sendInput() {
   if (!inGame || !ws || ws.readyState !== 1 || !myId) return;
-  ws.send(JSON.stringify({ type: "input", dx: input.dx, dy: input.dy }));
+  ws.send(JSON.stringify({ type: "input", dx: input.dx, dy: input.dy, mag: input.mag }));
 }
 
 function getMe() {
@@ -931,6 +943,31 @@ function getCameraPose() {
 }
 
 
+function drawImpulseSignal(player, radius) {
+  const until = Number(player.impulseSignalUntil) || 0;
+  if (until <= Date.now()) return;
+
+  const dir = player.impulseSignalDir;
+  if (!dir) return;
+
+  const t = Math.max(0, Math.min(1, (until - Date.now()) / 750));
+  const pulse = 0.55 + 0.45 * Math.sin(Date.now() * 0.02);
+  const len = radius + 16 + (1 - t) * 18;
+  const alpha = 0.18 + 0.2 * pulse;
+
+  ctx.strokeStyle = `rgba(180, 245, 255, ${alpha})`;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(player.x + dir.dx * (radius * 0.55), player.y + dir.dy * (radius * 0.55));
+  ctx.lineTo(player.x + dir.dx * len, player.y + dir.dy * len);
+  ctx.stroke();
+
+  const tx = player.x + dir.dx * len;
+  const ty = player.y + dir.dy * len;
+  ctx.fillStyle = `rgba(180, 245, 255, ${Math.min(0.5, alpha + 0.08)})`;
+  drawDustStar(tx, ty, 6, ctx.fillStyle, 1);
+}
+
 function draw() {
   const { camX, camY, scale } = getCameraPose();
   drawBackground(camX, camY);
@@ -959,6 +996,7 @@ function draw() {
   for (const p of state.players) {
     const r = radiusFromMass(p.mass);
     drawPlayerCore(p, r);
+    drawImpulseSignal(p, r);
 
     ctx.font = `${Math.max(10, Math.min(20, r * 0.4))}px system-ui`;
     ctx.textAlign = "center";
