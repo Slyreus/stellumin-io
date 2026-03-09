@@ -17,7 +17,7 @@
         </div>
       </div>
 
-      <div class="profile">
+      <div id="hudProfile" class="profile">
         <img id="avatar" class="avatar" alt="avatar" />
         <div class="meta">
           <div class="line">
@@ -31,7 +31,7 @@
         </div>
       </div>
 
-      <aside class="top10Hud">
+      <aside id="hudTop10" class="top10Hud">
         <div class="topTitle">Top 10</div>
         <ol id="top10List"></ol>
       </aside>
@@ -45,29 +45,31 @@
       <div class="menuCard">
         <div class="menuTitle">Stellumin.io</div>
 
-        <div class="menuProfile">
-          <img id="menuAvatar" class="avatar" alt="avatar" />
-          <div>
-            <div class="menuPseudoLabel">Pilote stellaire</div>
-            <div id="menuPseudo" class="menuPseudo">—</div>
+        <section class="menuSection menuAccountSection" aria-label="Profil et connexion">
+          <div class="menuProfile">
+            <img id="menuAvatar" class="avatar" alt="avatar" />
+            <div>
+              <div class="menuPseudoLabel">Pilote stellaire</div>
+              <div id="menuPseudo" class="menuPseudo">—</div>
+            </div>
           </div>
-        </div>
 
-        <div class="xpbar menuXpBar">
-          <div class="xpbarFill" id="menuXpFill"></div>
-        </div>
-        <div id="menuXpText" class="xptext">EXP globale · Niveau 1 · 0 / 50</div>
+          <div class="xpbar menuXpBar">
+            <div class="xpbarFill" id="menuXpFill"></div>
+          </div>
+          <div id="menuXpText" class="xptext">EXP globale · Niveau 1 · 0 / 50</div>
 
-        <div id="gameStatus" class="gameStatus">Aucune partie en cours · En attente du premier joueur</div>
+          <button id="twitchBtn" class="twitchBtn">Se connecter avec Twitch</button>
+          <div id="authStatus" class="authStatus">Non connecté à Twitch.</div>
+        </section>
 
-        <div class="menuTopWrap">
-          <div class="topTitle">Top 10 en cours</div>
-          <ol id="menuLeaderboard"></ol>
-        </div>
+        <div class="menuDivider" aria-hidden="true"></div>
 
-        <button id="twitchBtn" class="twitchBtn">Se connecter avec Twitch</button>
-        <div id="authStatus" class="authStatus">Non connecté à Twitch.</div>
-        <button id="playBtn" class="playBtn">Rejoindre la partie</button>
+        <section class="menuSection menuGameSection" aria-label="État de la partie">
+          <div class="menuSectionTitle">État de la partie</div>
+          <div id="gameStatus" class="gameStatus">Aucune partie en cours · En attente du premier joueur</div>
+          <button id="playBtn" class="playBtn">Rejoindre la partie</button>
+        </section>
       </div>
     </div>
 
