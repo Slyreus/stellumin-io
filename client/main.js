@@ -23,6 +23,7 @@ const quitBtn = $("quitBtn");
 
 const xpAnim = $("xpAnim");
 const xpAnimAmount = $("xpAnimAmount");
+const abilityHud = $("abilityHud");
 
 const TWITCH_CLIENT_ID = "qjt85uubxukx6b0woq20r63sfermgz";
 const TWITCH_REDIRECT_URI = `${window.location.origin}${window.location.pathname}`;
@@ -61,6 +62,13 @@ let myLocal = {
   avatar: "",
   twitchId: "",
   globalXp: 0
+};
+
+const abilityState = {
+  mass_eject: { id: "mass_eject", label: "Éjection de masse", key: "C", cooldownMs: 0, charges: Infinity, maxCharges: Infinity, availableAt: 0, disabled: false },
+  stellar_impulse: { id: "stellar_impulse", label: "Impulsion stellaire", key: "Space", cooldownMs: 0, charges: 3, maxCharges: 3, rechargeMs: 30000, rechargeQueue: [], availableAt: 0, disabled: false },
+  gravitation_pull: { id: "gravitation_pull", label: "Attraction gravitationnelle", key: "—", cooldownMs: Infinity, charges: 0, maxCharges: 0, availableAt: Infinity, disabled: true },
+  orbital_comet: { id: "orbital_comet", label: "Comète orbitale", key: "—", cooldownMs: Infinity, charges: 0, maxCharges: 0, availableAt: Infinity, disabled: true }
 };
 
 const WARNING_MARGIN = 300;
@@ -413,6 +421,7 @@ function showMenu() {
   quitBtn.style.display = "none";
   hudProfile.style.display = "none";
   hudTop10.style.display = "none";
+  if (abilityHud) abilityHud.style.display = "none";
 }
 
 function hideMenu() {
@@ -422,6 +431,7 @@ function hideMenu() {
   quitBtn.style.display = "block";
   hudProfile.style.display = "flex";
   hudTop10.style.display = "flex";
+  if (abilityHud) abilityHud.style.display = "grid";
 }
 
 function connectLobby(serverUrl) {
@@ -551,6 +561,103 @@ function animateXpGain(amount, totalAfter) {
   setTimeout(() => xpAnim.classList.remove("show"), 2600);
 }
 
+function consumeImpulseCharge() {
+  const ability = abilityState.stellar_impulse;
+  const now = Date.now();
+  ability.rechargeQueue = ability.rechargeQueue.filter((t) => t > now);
+  const available = Math.max(0, ability.maxCharges - ability.rechargeQueue.length);
+  if (available <= 0) return false;
+  ability.rechargeQueue.push(now + ability.rechargeMs);
+  return true;
+}
+
+function computeImpulseCharges() {
+  const ability = abilityState.stellar_impulse;
+  const now = Date.now();
+  ability.rechargeQueue = ability.rechargeQueue.filter((t) => t > now);
+  return Math.max(0, ability.maxCharges - ability.rechargeQueue.length);
+}
+
+function getCooldownText(ability) {
+  if (ability.disabled) return "CD: —";
+  if (ability.id === "stellar_impulse") {
+    const charges = computeImpulseCharges();
+    if (charges > 0) return "CD: 0s";
+    const next = Math.min(...ability.rechargeQueue);
+    const sec = Math.max(0, Math.ceil((next - Date.now()) / 1000));
+    return `CD: ${sec}s`;
+  }
+  return "CD: 0s";
+}
+
+function renderAbilityHud() {
+  if (!abilityHud) return;
+  const slots = abilityHud.querySelectorAll(".abilitySlot");
+  for (const slot of slots) {
+    const id = slot.dataset.ability;
+    const ability = abilityState[id];
+    if (!ability) continue;
+
+    const chargesEl = slot.querySelector(".abilityCharges");
+    const cooldownEl = slot.querySelector(".abilityCooldown");
+    const stateEl = slot.querySelector(".abilityState");
+
+    slot.classList.remove("is-cooldown", "is-unavailable");
+
+    if (ability.disabled) {
+      chargesEl.textContent = "Charges: —";
+      cooldownEl.textContent = "CD: —";
+      stateEl.textContent = "Bientôt disponible";
+      slot.classList.add("is-unavailable");
+      continue;
+    }
+
+    if (ability.id === "mass_eject") {
+      chargesEl.textContent = "Charges: ∞";
+      cooldownEl.textContent = "CD: 0s";
+      stateEl.textContent = "Prêt";
+      continue;
+    }
+
+    if (ability.id === "stellar_impulse") {
+      const charges = computeImpulseCharges();
+      chargesEl.textContent = `Charges: ${charges}/${ability.maxCharges}`;
+      cooldownEl.textContent = getCooldownText(ability);
+      if (charges > 0) {
+        stateEl.textContent = "Prêt";
+      } else {
+        stateEl.textContent = "Cooldown";
+        slot.classList.add("is-cooldown");
+      }
+    }
+  }
+}
+
+function tryUseAbility(abilityId) {
+  if (!inGame || !myId || !ws || ws.readyState !== 1) return;
+
+  const dirX = input.dx || 1;
+  const dirY = input.dy || 0;
+
+  if (abilityId === "stellar_impulse") {
+    const ok = consumeImpulseCharge();
+    if (!ok) {
+      renderAbilityHud();
+      return;
+    }
+  }
+
+  ws.send(JSON.stringify({
+    type: "ability_use",
+    ability: abilityId,
+    dx: dirX,
+    dy: dirY
+  }));
+
+  renderAbilityHud();
+}
+
+
 let input = { dx: 0, dy: 0 };
 window.addEventListener("mousemove", (e) => {
   if (!inGame) return;
@@ -567,6 +674,16 @@ window.addEventListener("wheel", (e) => {
   if (!inGame) return;
   e.preventDefault();
 }, { passive: false });
+
+window.addEventListener("keydown", (e) => {
+  if (e.repeat) return;
+  if (e.code === "KeyC") {
+    tryUseAbility("mass_eject");
+  } else if (e.code === "Space") {
+    e.preventDefault();
+    tryUseAbility("stellar_impulse");
+  }
+});
 
 function sendInput() {
   if (!inGame || !ws || ws.readyState !== 1 || !myId) return;
@@ -830,8 +947,11 @@ function draw() {
 
   for (const f of state.foods) {
     const isRare = f.kind === "rare";
-    const size = isRare ? f.r * 1.15 : f.r * 0.95;
-    const color = isRare ? "rgba(255, 228, 120, 0.96)" : "rgba(176, 120, 255, 0.9)";
+    const isEjected = f.kind === "ejected";
+    const size = isRare ? f.r * 1.15 : (isEjected ? f.r * 1.05 : f.r * 0.95);
+    const color = isRare
+      ? "rgba(255, 228, 120, 0.96)"
+      : (isEjected ? "rgba(128, 245, 255, 0.95)" : "rgba(176, 120, 255, 0.9)");
     drawDustStar(f.x, f.y, size, color);
   }
 
@@ -910,4 +1030,6 @@ quitBtn.addEventListener("click", leaveGame);
   if (!animationHandle) animationHandle = requestAnimationFrame(draw);
 
   if (!inputTimer) inputTimer = setInterval(sendInput, 50);
+  setInterval(renderAbilityHud, 120);
+  renderAbilityHud();
 })();
