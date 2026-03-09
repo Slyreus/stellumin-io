@@ -472,7 +472,8 @@ function connectLobby(serverUrl) {
         startedAt: Date.now(),
         durationMs: Math.max(500, Number(msg.durationMs) || 5000),
         camX: Number(msg.camera?.x) || 0,
-        camY: Number(msg.camera?.y) || 0
+        camY: Number(msg.camera?.y) || 0,
+        mass: Number(msg.camera?.mass) || 10
       };
       myId = null;
       return;
@@ -561,6 +562,11 @@ window.addEventListener("mousemove", (e) => {
   input.dx = vx / len;
   input.dy = vy / len;
 });
+
+window.addEventListener("wheel", (e) => {
+  if (!inGame) return;
+  e.preventDefault();
+}, { passive: false });
 
 function sendInput() {
   if (!inGame || !ws || ws.readyState !== 1 || !myId) return;
@@ -720,32 +726,24 @@ function getAvatarVisual(avatarUrl) {
   return visual;
 }
 
-function drawPlayerFlameAura(player, r, color) {
-  const pulse = 0.78 + 0.22 * Math.sin(Date.now() * 0.01 + player.mass * 0.02);
-  const outerRadius = r * 1.65 * pulse;
-  const grad = ctx.createRadialGradient(player.x, player.y, r * 0.6, player.x, player.y, outerRadius);
-  grad.addColorStop(0, `rgba(${color.r}, ${color.g}, ${color.b}, 0.34)`);
-  grad.addColorStop(0.62, `rgba(${color.r}, ${color.g}, ${color.b}, 0.16)`);
-  grad.addColorStop(1, `rgba(${color.r}, ${color.g}, ${color.b}, 0)`);
-  ctx.fillStyle = grad;
+function drawPlayerRadiance(player, r, color) {
+  const flow = 0.92 + 0.08 * Math.sin(Date.now() * 0.003 + player.mass * 0.015);
+  const outerRadius = r * 1.46 * flow;
+
+  const aura = ctx.createRadialGradient(player.x, player.y, r * 0.72, player.x, player.y, outerRadius);
+  aura.addColorStop(0, `rgba(${color.r}, ${color.g}, ${color.b}, 0.25)`);
+  aura.addColorStop(0.7, `rgba(${color.r}, ${color.g}, ${color.b}, 0.11)`);
+  aura.addColorStop(1, `rgba(${color.r}, ${color.g}, ${color.b}, 0)`);
+  ctx.fillStyle = aura;
   ctx.beginPath();
   ctx.arc(player.x, player.y, outerRadius, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.strokeStyle = `rgba(${Math.min(255, color.r + 40)}, ${Math.min(255, color.g + 40)}, ${Math.min(255, color.b + 40)}, 0.42)`;
-  ctx.lineWidth = 2.2;
+  const ringRadius = r * (1.08 + 0.02 * Math.sin(Date.now() * 0.004 + player.mass));
+  ctx.strokeStyle = `rgba(${Math.min(255, color.r + 36)}, ${Math.min(255, color.g + 36)}, ${Math.min(255, color.b + 36)}, 0.32)`;
+  ctx.lineWidth = 2;
   ctx.beginPath();
-  const spikes = 22;
-  for (let i = 0; i <= spikes; i++) {
-    const t = (i / spikes) * Math.PI * 2;
-    const wave = 1 + 0.12 * Math.sin(Date.now() * 0.01 + i * 0.7 + player.mass * 0.05);
-    const rr = r * (1.05 + 0.16 * wave);
-    const x = player.x + Math.cos(t) * rr;
-    const y = player.y + Math.sin(t) * rr;
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  }
-  ctx.closePath();
+  ctx.arc(player.x, player.y, ringRadius, 0, Math.PI * 2);
   ctx.stroke();
 }
 
@@ -753,7 +751,7 @@ function drawPlayerCore(player, r) {
   const visual = getAvatarVisual(player.avatar);
   const color = visual.color;
 
-  drawPlayerFlameAura(player, r, color);
+  drawPlayerRadiance(player, r, color);
 
   ctx.save();
   ctx.beginPath();
@@ -784,13 +782,22 @@ function drawPlayerCore(player, r) {
   ctx.stroke();
 }
 
+function getCameraScaleForMass(mass) {
+  const safeMass = Math.max(10, Number(mass) || 10);
+  const zoomOut = Math.min(0.42, Math.log10(safeMass) * 0.18);
+  return 1.28 - zoomOut;
+}
+
 function getCameraPose() {
   const me = getMe();
+  const followMass = me ? me.mass : (eliminationState?.mass || 10);
+  const baseScale = getCameraScaleForMass(followMass);
+
   if (!eliminationState || !eliminationState.active) {
     return {
       camX: me ? me.x : 0,
       camY: me ? me.y : 0,
-      scale: 1
+      scale: baseScale
     };
   }
 
@@ -801,7 +808,7 @@ function getCameraPose() {
   return {
     camX: eliminationState.camX,
     camY: eliminationState.camY,
-    scale: 1 - 0.52 * ease
+    scale: baseScale * (1 - 0.22 * ease)
   };
 }
 
