@@ -216,3 +216,41 @@ canvas{ display:block; width:100vw; height:100vh; }
   84%{ opacity:1; transform:translateY(-10px) scale(1.02); }
   100%{ opacity:0; transform:translateY(-24px) scale(1.03); }
 }
+
+.abilityHud{
+  position:fixed;
+  left:16px;
+  bottom:12px;
+  display:none;
+  grid-auto-flow:column;
+  grid-auto-columns:max-content;
+  align-items:end;
+  gap:6px;
+  z-index:20;
+  pointer-events:none;
+}
+.abilitySlot{
+  width:max-content;
+  min-width:136px;
+  max-width:200px;
+  height:74px;
+  display:grid;
+  grid-template-rows:repeat(3, min-content);
+  align-content:center;
+  border:1px solid rgba(255,230,120,.2);
+  background:rgba(11, 9, 22, .88);
+  border-radius:6px;
+  padding:6px 8px;
+  box-shadow:none;
+}
+.abilitySlot.disabled{
+  opacity:.72;
+  border-color:rgba(255,230,120,.14);
+}
+.abilityHeader{ display:flex; justify-content:space-between; align-items:center; gap:8px; font-size:12px; }
+.abilityHeader strong{ font-size:12px; white-space:nowrap; }
+.abilityKey{ color:var(--gold); font-weight:800; }
+.abilityMeta{ margin-top:4px; display:flex; justify-content:space-between; gap:10px; font-size:11px; color:var(--muted); white-space:nowrap; }
+.abilityState{ margin-top:4px; font-size:11px; font-weight:800; color:#9df9c8; white-space:nowrap; }
+.abilitySlot.is-cooldown .abilityState{ color:#ffd48a; }
+.abilitySlot.is-unavailable .abilityState{ color:#ff9ca0; }
