@@ -784,8 +784,9 @@ function drawPlayerCore(player, r) {
 
 function getCameraScaleForMass(mass) {
   const safeMass = Math.max(10, Number(mass) || 10);
-  const zoomOut = Math.min(0.42, Math.log10(safeMass) * 0.18);
-  return 1.28 - zoomOut;
+  const growthFactor = Math.max(0, Math.log2(safeMass / 10));
+  const zoomOut = Math.min(0.12, growthFactor * 0.016);
+  return 1.42 - zoomOut;
 }
 
 function getCameraPose() {
@@ -808,7 +809,7 @@ function getCameraPose() {
   return {
     camX: eliminationState.camX,
     camY: eliminationState.camY,
-    scale: baseScale * (1 - 0.22 * ease)
+    scale: baseScale * (1 - 0.06 * ease)
   };
 }
 
