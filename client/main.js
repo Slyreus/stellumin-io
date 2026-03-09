@@ -582,7 +582,7 @@ function getCooldownText(ability) {
   if (ability.disabled) return "CD: —";
   if (ability.id === "stellar_impulse") {
     const charges = computeImpulseCharges();
-    if (charges > 0) return "CD: 0s";
+    if (charges >= ability.maxCharges) return "CD: 0s";
     const next = Math.min(...ability.rechargeQueue);
     const sec = Math.max(0, Math.ceil((next - Date.now()) / 1000));
     return `CD: ${sec}s`;
@@ -950,22 +950,35 @@ function drawImpulseSignal(player, radius) {
   const dir = player.impulseSignalDir;
   if (!dir) return;
 
-  const t = Math.max(0, Math.min(1, (until - Date.now()) / 750));
+  const t = Math.max(0, Math.min(1, (until - Date.now()) / 1000));
   const pulse = 0.55 + 0.45 * Math.sin(Date.now() * 0.02);
-  const len = radius + 16 + (1 - t) * 18;
-  const alpha = 0.18 + 0.2 * pulse;
+  const len = radius + 20 + (1 - t) * 28;
+  const alpha = 0.32 + 0.34 * pulse;
 
   ctx.strokeStyle = `rgba(180, 245, 255, ${alpha})`;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(player.x + dir.dx * (radius * 0.45), player.y + dir.dy * (radius * 0.45));
+  ctx.lineTo(player.x + dir.dx * len, player.y + dir.dy * len);
+  ctx.stroke();
+
+  ctx.strokeStyle = `rgba(180, 245, 255, ${0.18 + 0.2 * pulse})`;
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(player.x + dir.dx * (radius * 0.55), player.y + dir.dy * (radius * 0.55));
-  ctx.lineTo(player.x + dir.dx * len, player.y + dir.dy * len);
+  ctx.arc(player.x, player.y, radius * (1.02 + 0.06 * pulse), 0, Math.PI * 2);
   ctx.stroke();
 
   const tx = player.x + dir.dx * len;
   const ty = player.y + dir.dy * len;
-  ctx.fillStyle = `rgba(180, 245, 255, ${Math.min(0.5, alpha + 0.08)})`;
-  drawDustStar(tx, ty, 6, ctx.fillStyle, 1);
+  drawDustStar(tx, ty, 7, `rgba(180, 245, 255, ${Math.min(0.72, alpha + 0.2)})`, 1);
+}
+
+
+function getContrastTextForPlayer(player) {
+  const visual = getAvatarVisual(player.avatar);
+  const c = visual.color || { r: 180, g: 180, b: 180 };
+  const luminance = (0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b) / 255;
+  return luminance > 0.54 ? "#0b1020" : "#f8fafc";
 }
 
 function draw() {
@@ -998,10 +1011,16 @@ function draw() {
     drawPlayerCore(p, r);
     drawImpulseSignal(p, r);
 
-    ctx.font = `${Math.max(10, Math.min(20, r * 0.4))}px system-ui`;
+    const nameSize = Math.max(10, Math.min(18, r * 0.36));
+    ctx.font = `700 ${nameSize}px system-ui`;
     ctx.textAlign = "center";
-    ctx.fillStyle = "rgba(8, 12, 24, 0.88)";
-    ctx.fillText(p.name, p.x, p.y + r + 16);
+    ctx.textBaseline = "middle";
+    const textColor = getContrastTextForPlayer(p);
+    ctx.strokeStyle = textColor === "#f8fafc" ? "rgba(0,0,0,0.45)" : "rgba(255,255,255,0.35)";
+    ctx.lineWidth = 2;
+    ctx.strokeText(p.name, p.x, p.y);
+    ctx.fillStyle = textColor;
+    ctx.fillText(p.name, p.x, p.y);
 
     if (me && p.id === me.id) drawBoundaryWarning(p, r);
   }

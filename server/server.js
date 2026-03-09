@@ -31,7 +31,7 @@ const EJECTED_DRAG = 0.9;
 const IMPULSE_RATIO = 0.10;
 const IMPULSE_MIN = 4;
 const IMPULSE_PUSH = 440;
-const IMPULSE_TELEGRAPH_MS = 750;
+const IMPULSE_TELEGRAPH_MS = 1000;
 const IMPULSE_CHARGES = 3;
 const IMPULSE_RECHARGE_MS = 30000;
 const IMPULSE_CHUNK_TARGET = 22;
@@ -148,13 +148,15 @@ function spawnEjectedChunks(player, dir, totalMass, speed, distance, jitter = 0.
     const jx = dir.dx + offset;
     const jy = dir.dy - offset;
     const nd = normalizeDir(jx, jy);
+    const distOffset = rand(-6, 10);
+    const speedScale = rand(0.9, 1.08);
     foods.push(makeEjectedMass({
-      x: clamp(player.x + nd.dx * (pr + distance), -WORLD_W / 2, WORLD_W / 2),
-      y: clamp(player.y + nd.dy * (pr + distance), -WORLD_H / 2, WORLD_H / 2),
+      x: clamp(player.x + nd.dx * (pr + distance + distOffset), -WORLD_W / 2, WORLD_W / 2),
+      y: clamp(player.y + nd.dy * (pr + distance + distOffset), -WORLD_H / 2, WORLD_H / 2),
       dx: nd.dx,
       dy: nd.dy,
       mass,
-      speed
+      speed: speed * speedScale
     }));
   }
 }
@@ -210,7 +212,7 @@ function resolvePendingImpulses(player) {
     if (player.mass - cost < 6) continue;
 
     player.mass -= cost;
-    spawnEjectedChunks(player, { dx: -pending.dir.dx, dy: -pending.dir.dy }, cost, MASS_EJECT_SPEED * 0.72, 12, 0.08);
+    spawnEjectedChunks(player, { dx: -pending.dir.dx, dy: -pending.dir.dy }, cost, MASS_EJECT_SPEED * 0.72, 12, 0.18);
     player.vx += pending.dir.dx * IMPULSE_PUSH;
     player.vy += pending.dir.dy * IMPULSE_PUSH;
   }
