@@ -45,30 +45,31 @@
       <div class="menuCard">
         <div class="menuTitle">Stellumin.io</div>
 
-        <div class="menuProfile">
-          <img id="menuAvatar" class="avatar" alt="avatar" />
-          <div>
-            <div class="menuPseudoLabel">Pilote stellaire</div>
-            <div id="menuPseudo" class="menuPseudo">—</div>
+        <section class="menuSection menuAccountSection" aria-label="Profil et connexion">
+          <div class="menuProfile">
+            <img id="menuAvatar" class="avatar" alt="avatar" />
+            <div>
+              <div class="menuPseudoLabel">Pilote stellaire</div>
+              <div id="menuPseudo" class="menuPseudo">—</div>
+            </div>
           </div>
-        </div>
 
-        <div class="xpbar menuXpBar">
-          <div class="xpbarFill" id="menuXpFill"></div>
-        </div>
-        <div id="menuXpText" class="xptext">EXP globale · Niveau 1 · 0 / 50</div>
+          <div class="xpbar menuXpBar">
+            <div class="xpbarFill" id="menuXpFill"></div>
+          </div>
+          <div id="menuXpText" class="xptext">EXP globale · Niveau 1 · 0 / 50</div>
 
-        <button id="twitchBtn" class="twitchBtn">Se connecter avec Twitch</button>
-        <div id="authStatus" class="authStatus">Non connecté à Twitch.</div>
+          <button id="twitchBtn" class="twitchBtn">Se connecter avec Twitch</button>
+          <div id="authStatus" class="authStatus">Non connecté à Twitch.</div>
+        </section>
 
         <div class="menuDivider" aria-hidden="true"></div>
 
-        <div class="menuServerStatus">
+        <section class="menuSection menuGameSection" aria-label="État de la partie">
           <div class="menuSectionTitle">État de la partie</div>
           <div id="gameStatus" class="gameStatus">Aucune partie en cours · En attente du premier joueur</div>
-        </div>
-
-        <button id="playBtn" class="playBtn">Rejoindre la partie</button>
+          <button id="playBtn" class="playBtn">Rejoindre la partie</button>
+        </section>
       </div>
     </div>
 
