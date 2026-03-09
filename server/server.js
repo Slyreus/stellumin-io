@@ -22,6 +22,20 @@ const DRAG = 0.92;
 const START_MASS = 10;
 const MASS_TO_GLOBAL_XP_RATE = 0.35;
 
+const MASS_EJECT_MIN_RATIO = 0.01;
+const MASS_EJECT_MAX_RATIO = 0.02;
+const MASS_EJECT_MIN = 1.2;
+const MASS_EJECT_SPEED = 620;
+const EJECTED_DRAG = 0.9;
+
+const IMPULSE_RATIO = 0.10;
+const IMPULSE_MIN = 4;
+const IMPULSE_PUSH = 440;
+const IMPULSE_TELEGRAPH_MS = 1000;
+const IMPULSE_CHARGES = 3;
+const IMPULSE_RECHARGE_MS = 30000;
+const IMPULSE_CHUNK_TARGET = 22;
+
 const DATA_DIR = path.resolve("./data");
 const PLAYER_STORE_PATH = path.join(DATA_DIR, "player-progress.json");
 
@@ -53,7 +67,10 @@ function makeFood() {
     y: rand(-WORLD_H / 2, WORLD_H / 2),
     r: FOOD_RADIUS,
     kind: isRare ? "rare" : "common",
-    mass: isRare ? RARE_FOOD_MASS : COMMON_FOOD_MASS
+    mass: isRare ? RARE_FOOD_MASS : COMMON_FOOD_MASS,
+    grantSessionGain: true,
+    vx: 0,
+    vy: 0
   };
 }
 
@@ -87,6 +104,124 @@ function pickSpawnPoint() {
   return { x: best.x, y: best.y };
 }
 
+
+function normalizeDir(dx, dy) {
+  const len = Math.hypot(dx, dy) || 1;
+  return { dx: dx / len, dy: dy / len };
+}
+
+function radiusFromLooseMass(mass) {
+  return Math.max(4, FOOD_RADIUS + Math.sqrt(Math.max(0.1, mass)) * 1.1);
+}
+
+function makeEjectedMass({ x, y, dx, dy, mass, speed, grantSessionGain = false }) {
+  return {
+    id: cryptoRandomId(),
+    x,
+    y,
+    r: radiusFromLooseMass(mass),
+    kind: "ejected",
+    mass,
+    grantSessionGain,
+    vx: dx * speed,
+    vy: dy * speed
+  };
+}
+
+
+function splitMass(totalMass, targetChunk) {
+  const chunks = [];
+  let remaining = Math.max(0, totalMass);
+  while (remaining > 0.001) {
+    const chunk = Math.min(remaining, targetChunk);
+    chunks.push(chunk);
+    remaining -= chunk;
+  }
+  return chunks;
+}
+
+function spawnEjectedChunks(player, dir, totalMass, speed, distance, jitter = 0.06) {
+  const pr = radiusFromMass(player.mass);
+  const chunks = splitMass(totalMass, IMPULSE_CHUNK_TARGET);
+  for (const mass of chunks) {
+    const offset = rand(-jitter, jitter);
+    const jx = dir.dx + offset;
+    const jy = dir.dy - offset;
+    const nd = normalizeDir(jx, jy);
+    const distOffset = rand(-6, 10);
+    const speedScale = rand(0.9, 1.08);
+    foods.push(makeEjectedMass({
+      x: clamp(player.x + nd.dx * (pr + distance + distOffset), -WORLD_W / 2, WORLD_W / 2),
+      y: clamp(player.y + nd.dy * (pr + distance + distOffset), -WORLD_H / 2, WORLD_H / 2),
+      dx: nd.dx,
+      dy: nd.dy,
+      mass,
+      speed: speed * speedScale
+    }));
+  }
+}
+function availableImpulseCharges(player) {
+  const now = Date.now();
+  player.impulseRecharge = player.impulseRecharge.filter((t) => t > now);
+  return Math.max(0, IMPULSE_CHARGES - player.impulseRecharge.length);
+}
+
+function tryConsumeImpulseCharge(player) {
+  if (availableImpulseCharges(player) <= 0) return false;
+  player.impulseRecharge.push(Date.now() + IMPULSE_RECHARGE_MS);
+  return true;
+}
+
+function castMassEject(player, dir) {
+  const ratio = rand(MASS_EJECT_MIN_RATIO, MASS_EJECT_MAX_RATIO);
+  const cost = Math.max(MASS_EJECT_MIN, player.mass * ratio);
+  if (player.mass - cost < 6) return false;
+
+  player.mass -= cost;
+  spawnEjectedChunks(player, dir, cost, MASS_EJECT_SPEED, 10, 0.04);
+  return true;
+}
+
+function castStellarImpulse(player, dir) {
+  if (!tryConsumeImpulseCharge(player)) return false;
+
+  const cost = Math.max(IMPULSE_MIN, player.mass * IMPULSE_RATIO);
+  if (player.mass - cost < 6) {
+    player.impulseRecharge.pop();
+    return false;
+  }
+
+  const executeAt = Date.now() + IMPULSE_TELEGRAPH_MS;
+  player.pendingImpulses.push({ executeAt, dir, massCost: cost });
+  player.impulseSignal = { until: executeAt, dir };
+  return true;
+}
+
+function resolvePendingImpulses(player) {
+  if (!player.pendingImpulses.length) return;
+  const now = Date.now();
+  const remaining = [];
+
+  for (const pending of player.pendingImpulses) {
+    if (pending.executeAt > now) {
+      remaining.push(pending);
+      continue;
+    }
+
+    const cost = Math.max(IMPULSE_MIN, pending.massCost);
+    if (player.mass - cost < 6) continue;
+
+    player.mass -= cost;
+    spawnEjectedChunks(player, { dx: -pending.dir.dx, dy: -pending.dir.dy }, cost, MASS_EJECT_SPEED * 0.72, 12, 0.18);
+    player.vx += pending.dir.dx * IMPULSE_PUSH;
+    player.vy += pending.dir.dy * IMPULSE_PUSH;
+  }
+
+  player.pendingImpulses = remaining;
+  if (player.impulseSignal && player.impulseSignal.until <= now) {
+    player.impulseSignal = null;
+  }
+}
 const wss = new WebSocketServer({ port: PORT });
 const players = new Map();
 const sockets = new Map();
@@ -257,7 +392,9 @@ function snapshotForClient() {
       avatar: p.avatar,
       x: p.x,
       y: p.y,
-      mass: p.mass
+      mass: p.mass,
+      impulseSignalUntil: p.impulseSignal?.until || 0,
+      impulseSignalDir: p.impulseSignal?.dir || null
     });
   }
 
@@ -350,7 +487,10 @@ wss.on("connection", (ws) => {
         vy: 0,
         mass: START_MASS,
         sessionMassGained: 0,
-        input: { dx: 0, dy: 0 }
+        input: { dx: 0, dy: 0, mag: 1 },
+        impulseRecharge: [],
+        pendingImpulses: [],
+        impulseSignal: null
       };
 
       players.set(id, p);
@@ -370,6 +510,24 @@ wss.on("connection", (ws) => {
       return;
     }
 
+
+    if (msg.type === "ability_use") {
+      const pid = sockets.get(ws);
+      if (!pid) return;
+      const p = players.get(pid);
+      if (!p) return;
+
+      const { dx, dy } = normalizeDir(Number(msg.dx) || 0, Number(msg.dy) || 0);
+      const ability = typeof msg.ability === "string" ? msg.ability : "";
+
+      if (ability === "mass_eject") {
+        castMassEject(p, { dx, dy });
+      } else if (ability === "stellar_impulse") {
+        castStellarImpulse(p, { dx, dy });
+      }
+      return;
+    }
+
     if (msg.type === "input") {
       const pid = sockets.get(ws);
       if (!pid) return;
@@ -378,6 +536,8 @@ wss.on("connection", (ws) => {
 
       p.input.dx = clamp(Number(msg.dx) || 0, -1, 1);
       p.input.dy = clamp(Number(msg.dy) || 0, -1, 1);
+      p.input.mag = clamp(Number(msg.mag), 0, 1);
+      if (!Number.isFinite(p.input.mag)) p.input.mag = 1;
     }
   });
 
@@ -395,10 +555,22 @@ setInterval(() => {
 
   while (foods.length < FOOD_TARGET) foods.push(makeFood());
 
+  for (const f of foods) {
+    if (!f.vx && !f.vy) continue;
+    f.vx *= EJECTED_DRAG;
+    f.vy *= EJECTED_DRAG;
+    if (Math.abs(f.vx) < 5) f.vx = 0;
+    if (Math.abs(f.vy) < 5) f.vy = 0;
+    f.x = clamp(f.x + f.vx * DT, -WORLD_W / 2, WORLD_W / 2);
+    f.y = clamp(f.y + f.vy * DT, -WORLD_H / 2, WORLD_H / 2);
+  }
+
   for (const p of players.values()) {
+    resolvePendingImpulses(p);
     const sp = speedFromMass(p.mass);
-    p.vx = p.vx * DRAG + p.input.dx * sp * (1 - DRAG);
-    p.vy = p.vy * DRAG + p.input.dy * sp * (1 - DRAG);
+    const moveFactor = clamp(Number(p.input.mag), 0, 1);
+    p.vx = p.vx * DRAG + p.input.dx * sp * moveFactor * (1 - DRAG);
+    p.vy = p.vy * DRAG + p.input.dy * sp * moveFactor * (1 - DRAG);
 
     p.x += p.vx * DT;
     p.y += p.vy * DT;
@@ -412,7 +584,7 @@ setInterval(() => {
       if (dist2(p.x, p.y, f.x, f.y) <= (pr + f.r) * (pr + f.r)) {
         foods.splice(i, 1);
         p.mass += f.mass;
-        p.sessionMassGained += f.mass;
+        if (f.grantSessionGain !== false) p.sessionMassGained += f.mass;
       }
     }
   }
