@@ -86,6 +86,10 @@ let adminState = {
 const ADMIN_TWITCH_ID = "80576726";
 
 const WARNING_MARGIN = 300;
+const MASS_RADIUS_FACTOR = 0.2;
+const CAMERA_FOLLOW_LERP = 0.17;
+const CAMERA_SCALE_LERP = 0.12;
+const RENDER_MASS_LERP = 0.22;
 const backgroundStars = Array.from({ length: 260 }, () => ({
   x: Math.random() * 7000 - 3500,
   y: Math.random() * 7000 - 3500,
@@ -93,6 +97,15 @@ const backgroundStars = Array.from({ length: 260 }, () => ({
   glow: Math.random() * 0.55 + 0.2,
   drift: Math.random() * 0.35 + 0.65
 }));
+const renderMassByPlayerId = new Map();
+const cameraState = {
+  initialized: false,
+  camX: 0,
+  camY: 0,
+  scale: 1
+};
+
+
 
 function getServerUrl() {
   const fromConfig = window.STELLUMIN_CONFIG?.WS_SERVER_URL;
@@ -505,6 +518,8 @@ function showMenu() {
   inGame = false;
   eliminationState = null;
   myId = null;
+  renderMassByPlayerId.clear();
+  cameraState.initialized = false;
   menu.style.display = "grid";
   quitBtn.style.display = "none";
   hudProfile.style.display = "none";
@@ -515,6 +530,7 @@ function showMenu() {
 function hideMenu() {
   inGame = true;
   eliminationState = null;
+  cameraState.initialized = false;
   menu.style.display = "none";
   quitBtn.style.display = "block";
   hudProfile.style.display = "flex";
@@ -610,6 +626,10 @@ function connectLobby(serverUrl) {
     if (msg.type === "state") {
       state.players = msg.players || [];
       state.foods = msg.foods || [];
+      const aliveIds = new Set(state.players.map((p) => p.id));
+      for (const id of [...renderMassByPlayerId.keys()]) {
+        if (!aliveIds.has(id)) renderMassByPlayerId.delete(id);
+      }
       state.world = msg.world || state.world;
       latestTop = msg.top || [];
 
@@ -822,7 +842,21 @@ function getMe() {
 
 function radiusFromMass(mass) {
   const safeMass = Math.max(1, Number(mass) || 1);
-  return 18 + Math.pow(safeMass, 0.9) * 0.14;
+  return Math.max(6, safeMass * MASS_RADIUS_FACTOR);
+}
+
+function getSmoothedMass(player) {
+  const actualMass = Math.max(1, Number(player?.mass) || 1);
+  const previous = renderMassByPlayerId.get(player.id);
+
+  if (!Number.isFinite(previous)) {
+    renderMassByPlayerId.set(player.id, actualMass);
+    return actualMass;
+  }
+
+  const next = previous + (actualMass - previous) * RENDER_MASS_LERP;
+  renderMassByPlayerId.set(player.id, next);
+  return next;
 }
 
 function drawDustStar(x, y, size, color, alpha = 1) {
@@ -1024,33 +1058,48 @@ function drawPlayerCore(player, r) {
 function getCameraScaleForMass(mass) {
   const safeMass = Math.max(10, Number(mass) || 10);
   const radius = radiusFromMass(safeMass);
-  const referenceRadius = radiusFromMass(10);
-  const ratio = Math.max(1, radius / referenceRadius);
-  const scale = 1.46 / Math.pow(ratio, 0.2);
-  return Math.max(0.86, Math.min(1.5, scale));
+  const closeupTarget = Math.min(window.innerWidth, window.innerHeight) * 0.22;
+  const scale = closeupTarget / Math.max(1, radius);
+  return Math.max(0.08, Math.min(1.35, scale));
 }
 
 function getCameraPose() {
   const me = getMe();
-  const followMass = me ? me.mass : (eliminationState?.mass || 10);
-  const baseScale = getCameraScaleForMass(followMass);
+
+  let targetX = 0;
+  let targetY = 0;
+  let followMass = eliminationState?.mass || 10;
 
   if (!eliminationState || !eliminationState.active) {
-    return {
-      camX: me ? me.x : 0,
-      camY: me ? me.y : 0,
-      scale: baseScale
-    };
+    targetX = me ? me.x : 0;
+    targetY = me ? me.y : 0;
+    followMass = me ? getSmoothedMass(me) : followMass;
+  } else {
+    targetX = eliminationState.camX;
+    targetY = eliminationState.camY;
   }
 
-  const elapsed = Date.now() - eliminationState.startedAt;
-  const t = Math.min(1, elapsed / eliminationState.durationMs);
+  const baseScale = getCameraScaleForMass(followMass);
+  const elapsed = eliminationState?.active ? Date.now() - eliminationState.startedAt : 0;
+  const t = eliminationState?.active ? Math.min(1, elapsed / eliminationState.durationMs) : 0;
   const ease = t * t * (3 - 2 * t);
+  const targetScale = baseScale * (1 - 0.06 * ease);
+
+  if (!cameraState.initialized) {
+    cameraState.initialized = true;
+    cameraState.camX = targetX;
+    cameraState.camY = targetY;
+    cameraState.scale = targetScale;
+  }
+
+  cameraState.camX += (targetX - cameraState.camX) * CAMERA_FOLLOW_LERP;
+  cameraState.camY += (targetY - cameraState.camY) * CAMERA_FOLLOW_LERP;
+  cameraState.scale += (targetScale - cameraState.scale) * CAMERA_SCALE_LERP;
 
   return {
-    camX: eliminationState.camX,
-    camY: eliminationState.camY,
-    scale: baseScale * (1 - 0.06 * ease)
+    camX: cameraState.camX,
+    camY: cameraState.camY,
+    scale: cameraState.scale
   };
 }
 
@@ -1119,7 +1168,7 @@ function draw() {
 
   const me = getMe();
   for (const p of state.players) {
-    const r = radiusFromMass(p.mass);
+    const r = radiusFromMass(getSmoothedMass(p));
     drawPlayerCore(p, r);
     drawImpulseSignal(p, r);
 
