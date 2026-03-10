@@ -7,7 +7,6 @@
   --muted:rgba(255,240,192,.68);
   --accent:#8f58ff;
   --gold:#ffd84a;
-  --ui-scale:clamp(0.7, 0.62 + 0.5vw, 0.8);
 }
 
 *{ box-sizing:border-box; }
@@ -15,33 +14,6 @@ html,body{ height:100%; margin:0; background:var(--bg); color:var(--text); font-
 #app{ height:100%; overflow:hidden; }
 
 canvas{ display:block; width:100vw; height:100vh; }
-
-
-.hud{
-  transform:scale(var(--ui-scale));
-  transform-origin:top left;
-}
-
-.menuCard{
-  transform:scale(var(--ui-scale));
-  transform-origin:center;
-}
-
-.quitBtn,
-.xpAnim,
-.abilityHud,
-.adminPanel{
-  transform:scale(var(--ui-scale));
-}
-
-.quitBtn{ transform-origin:bottom right; }
-.xpAnim{ transform-origin:bottom right; }
-.abilityHud{ transform-origin:bottom left; }
-.adminPanel{ transform-origin:top left; }
-
-@media (max-width: 900px){
-  :root{ --ui-scale:clamp(0.62, 0.54 + 0.7vw, 0.74); }
-}
 
 .hud{
   position:fixed; inset:0 0 auto 0;
