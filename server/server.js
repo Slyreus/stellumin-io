@@ -16,7 +16,8 @@ const COMMON_FOOD_MASS = 1;
 const RARE_FOOD_MASS = 10;
 const RARE_FOOD_CHANCE = 0.06;
 
-const BASE_RADIUS = 18;
+const BASE_RADIUS = 0;
+const MASS_RADIUS_FACTOR = 0.2;
 const SPEED = 360;
 const DRAG = 0.92;
 const START_MASS = 10;
@@ -51,7 +52,7 @@ const dist2 = (ax, ay, bx, by) => {
 
 function radiusFromMass(mass) {
   const safeMass = Math.max(1, Number(mass) || 1);
-  return BASE_RADIUS + Math.pow(safeMass, 0.9) * 0.14;
+  return Math.max(6, BASE_RADIUS + safeMass * MASS_RADIUS_FACTOR);
 }
 
 function speedFromMass(mass) {
