@@ -216,3 +216,86 @@ canvas{ display:block; width:100vw; height:100vh; }
   84%{ opacity:1; transform:translateY(-10px) scale(1.02); }
   100%{ opacity:0; transform:translateY(-24px) scale(1.03); }
 }
+
+.abilityHud{
+  position:fixed;
+  left:16px;
+  bottom:12px;
+  display:none;
+  grid-auto-flow:column;
+  grid-auto-columns:max-content;
+  align-items:end;
+  gap:6px;
+  z-index:20;
+  pointer-events:none;
+}
+.abilitySlot{
+  width:max-content;
+  min-width:136px;
+  max-width:200px;
+  height:74px;
+  display:grid;
+  grid-template-rows:repeat(3, min-content);
+  align-content:center;
+  border:1px solid rgba(255,230,120,.2);
+  background:rgba(11, 9, 22, .88);
+  border-radius:6px;
+  padding:6px 8px;
+  box-shadow:none;
+}
+.abilitySlot.disabled{
+  opacity:.72;
+  border-color:rgba(255,230,120,.14);
+}
+.abilityHeader{ display:flex; justify-content:space-between; align-items:center; gap:8px; font-size:12px; }
+.abilityHeader strong{ font-size:12px; white-space:nowrap; }
+.abilityKey{ color:var(--gold); font-weight:800; }
+.abilityMeta{ margin-top:4px; display:flex; justify-content:space-between; gap:10px; font-size:11px; color:var(--muted); white-space:nowrap; }
+.abilityState{ margin-top:4px; font-size:11px; font-weight:800; color:#9df9c8; white-space:nowrap; }
+.abilitySlot.is-cooldown .abilityState{ color:#ffd48a; }
+.abilitySlot.is-unavailable .abilityState{ color:#ff9ca0; }
+
+
+.adminPanel{
+  position:fixed;
+  top:124px;
+  left:16px;
+  pointer-events:auto;
+  z-index:35;
+}
+.adminBtn{
+  border:1px solid rgba(180,245,255,.55);
+  background:rgba(20,36,56,.7);
+  color:var(--text);
+  border-radius:10px;
+  font-size:12px;
+  font-weight:700;
+  padding:5px 9px;
+  cursor:pointer;
+}
+.adminDropdown{
+  margin-top:8px;
+  width:560px;
+  max-height:62vh;
+  overflow:auto;
+  border:1px solid rgba(180,245,255,.35);
+  border-radius:10px;
+  background:rgba(8,13,24,.92);
+  padding:8px;
+}
+.adminActions{ display:flex; gap:8px; }
+.adminActions button{
+  border:1px solid rgba(255,255,255,.2);
+  background:rgba(255,255,255,.08);
+  color:var(--text);
+  border-radius:8px;
+  font-size:12px;
+  padding:6px 8px;
+  cursor:pointer;
+}
+.adminNotice{ margin-top:6px; min-height:16px; font-size:12px; color:var(--muted); }
+.adminTableWrap{ margin-top:6px; }
+.adminTable{ width:100%; border-collapse:collapse; font-size:12px; }
+.adminTable th,.adminTable td{ border-bottom:1px solid rgba(255,255,255,.12); padding:6px; text-align:left; }
+.adminRowActions{ display:flex; gap:5px; flex-wrap:wrap; }
+.adminRowActions button{ font-size:11px; padding:4px 6px; border-radius:6px; border:1px solid rgba(255,255,255,.2); background:rgba(255,255,255,.08); color:var(--text); cursor:pointer; }
