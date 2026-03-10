@@ -397,6 +397,8 @@ function snapshotForClient() {
       avatar: p.avatar,
       x: p.x,
       y: p.y,
+      vx: p.vx,
+      vy: p.vy,
       mass: p.mass,
       radius: radiusFromMass(p.mass),
       impulseSignalUntil: p.impulseSignal?.until || 0,

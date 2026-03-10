@@ -65,6 +65,9 @@ let state = {
   world: { w: 4000, h: 4000 }
 };
 
+let lastServerStateAt = Date.now();
+const MAX_EXTRAPOLATION_SECONDS = 0.22;
+
 let myLocal = {
   name: "Player",
   avatar: "",
@@ -611,6 +614,7 @@ function connectLobby(serverUrl) {
       state.players = msg.players || [];
       state.foods = msg.foods || [];
       state.world = msg.world || state.world;
+      lastServerStateAt = Number(msg.t) || Date.now();
       latestTop = msg.top || [];
 
       renderTopHud();
@@ -816,8 +820,8 @@ function sendInput() {
   ws.send(JSON.stringify({ type: "input", dx: input.dx, dy: input.dy, mag: input.mag }));
 }
 
-function getMe() {
-  return state.players.find((p) => p.id === myId) || null;
+function getMe(players = state.players) {
+  return players.find((p) => p.id === myId) || null;
 }
 
 function radiusFromMass(mass) {
@@ -829,6 +833,34 @@ function getPlayerRadius(player) {
   const serverRadius = Number(player?.radius);
   if (Number.isFinite(serverRadius) && serverRadius > 0) return serverRadius;
   return radiusFromMass(player?.mass);
+}
+
+function getExtrapolatedRenderState() {
+  const dt = Math.max(0, Math.min(MAX_EXTRAPOLATION_SECONDS, (Date.now() - lastServerStateAt) / 1000));
+  const halfW = state.world.w / 2;
+  const halfH = state.world.h / 2;
+
+  const players = state.players.map((p) => {
+    const vx = Number(p.vx) || 0;
+    const vy = Number(p.vy) || 0;
+    return {
+      ...p,
+      x: Math.max(-halfW, Math.min(halfW, p.x + vx * dt)),
+      y: Math.max(-halfH, Math.min(halfH, p.y + vy * dt))
+    };
+  });
+
+  const foods = state.foods.map((f) => {
+    const vx = Number(f.vx) || 0;
+    const vy = Number(f.vy) || 0;
+    return {
+      ...f,
+      x: Math.max(-halfW, Math.min(halfW, f.x + vx * dt)),
+      y: Math.max(-halfH, Math.min(halfH, f.y + vy * dt))
+    };
+  });
+
+  return { players, foods };
 }
 
 function drawDustStar(x, y, size, color, alpha = 1) {
@@ -1027,19 +1059,18 @@ function drawPlayerCore(player, r) {
   ctx.stroke();
 }
 
-function getCameraScaleForMass(mass) {
-  const safeMass = Math.max(10, Number(mass) || 10);
-  const radius = getPlayerRadius({ mass: safeMass });
+function getCameraScaleForRadius(radius) {
+  const safeRadius = Math.max(radiusFromMass(10), Number(radius) || radiusFromMass(10));
   const referenceRadius = radiusFromMass(10);
-  const ratio = Math.max(1, radius / referenceRadius);
+  const ratio = Math.max(1, safeRadius / referenceRadius);
   const scale = 1.46 / Math.pow(ratio, 0.2);
   return Math.max(0.86, Math.min(1.5, scale));
 }
 
-function getCameraPose() {
-  const me = getMe();
-  const followMass = me ? me.mass : (eliminationState?.mass || 10);
-  const baseScale = getCameraScaleForMass(followMass);
+function getCameraPose(renderPlayers = state.players) {
+  const me = getMe(renderPlayers);
+  const followRadius = me ? getPlayerRadius(me) : radiusFromMass(eliminationState?.mass || 10);
+  const baseScale = getCameraScaleForRadius(followRadius);
 
   if (!eliminationState || !eliminationState.active) {
     return {
@@ -1100,7 +1131,8 @@ function getContrastTextForPlayer(player) {
 }
 
 function draw() {
-  const { camX, camY, scale } = getCameraPose();
+  const renderState = getExtrapolatedRenderState();
+  const { camX, camY, scale } = getCameraPose(renderState.players);
   drawBackground(camX, camY);
 
   if (!inGame) {
@@ -1113,7 +1145,7 @@ function draw() {
   ctx.scale(scale, scale);
   ctx.translate(-camX, -camY);
 
-  for (const f of state.foods) {
+  for (const f of renderState.foods) {
     const isRare = f.kind === "rare";
     const isEjected = f.kind === "ejected";
     const size = f.r;
@@ -1123,8 +1155,8 @@ function draw() {
     drawDustStar(f.x, f.y, size, color);
   }
 
-  const me = getMe();
-  for (const p of state.players) {
+  const me = getMe(renderState.players);
+  for (const p of renderState.players) {
     const r = getPlayerRadius(p);
     drawPlayerCore(p, r);
     drawImpulseSignal(p, r);
