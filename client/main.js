@@ -850,15 +850,12 @@ function getExtrapolatedRenderState() {
     };
   });
 
-  const foods = state.foods.map((f) => {
-    const vx = Number(f.vx) || 0;
-    const vy = Number(f.vy) || 0;
-    return {
-      ...f,
-      x: Math.max(-halfW, Math.min(halfW, f.x + vx * dt)),
-      y: Math.max(-halfH, Math.min(halfH, f.y + vy * dt))
-    };
-  });
+  const foods = state.foods.map((f) => ({
+    ...f,
+    // Keep food at server snapshot positions to avoid "teleporting" ejected chunks away from the star edge.
+    x: Math.max(-halfW, Math.min(halfW, f.x)),
+    y: Math.max(-halfH, Math.min(halfH, f.y))
+  }));
 
   return { players, foods };
 }
