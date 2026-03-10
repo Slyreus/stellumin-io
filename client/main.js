@@ -860,37 +860,6 @@ function getExtrapolatedRenderState() {
   return { players, foods };
 }
 
-function getPlayerRadius(player) {
-  const serverRadius = Number(player?.radius);
-  if (Number.isFinite(serverRadius) && serverRadius > 0) return serverRadius;
-  return radiusFromMass(player?.mass);
-}
-
-function getExtrapolatedRenderState() {
-  const dt = Math.max(0, Math.min(MAX_EXTRAPOLATION_SECONDS, (Date.now() - lastServerStateAt) / 1000));
-  const halfW = state.world.w / 2;
-  const halfH = state.world.h / 2;
-
-  const players = state.players.map((p) => {
-    const vx = Number(p.vx) || 0;
-    const vy = Number(p.vy) || 0;
-    return {
-      ...p,
-      x: Math.max(-halfW, Math.min(halfW, p.x + vx * dt)),
-      y: Math.max(-halfH, Math.min(halfH, p.y + vy * dt))
-    };
-  });
-
-  const foods = state.foods.map((f) => ({
-    ...f,
-    // Keep food at server snapshot positions to avoid "teleporting" ejected chunks away from the star edge.
-    x: Math.max(-halfW, Math.min(halfW, f.x)),
-    y: Math.max(-halfH, Math.min(halfH, f.y))
-  }));
-
-  return { players, foods };
-}
-
 function drawDustStar(x, y, size, color, alpha = 1) {
   ctx.save();
   ctx.translate(x, y);
@@ -1282,8 +1251,14 @@ if (adminTableBody) {
   const serverUrl = getServerUrl();
   connectLobby(serverUrl);
 
+  // Always initialize menu/hud baseline, even if Twitch redirect handling fails.
+  showMenu();
+
   const authResult = await maybeHandleTwitchRedirect();
-  if (authResult.handled && !authResult.success) return;
+  if (authResult.handled && !authResult.success) {
+    updateAuthStatus(null);
+    hydrateProfile(null);
+  }
 
   const profile = getSavedTwitchProfile();
   updateAuthStatus(profile);
@@ -1293,7 +1268,6 @@ if (adminTableBody) {
     sendProgressRequest();
   }
 
-  showMenu();
   renderStatus();
   renderTopHud();
   if (!animationHandle) animationHandle = requestAnimationFrame(draw);
