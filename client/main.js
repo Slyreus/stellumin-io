@@ -802,7 +802,8 @@ function getMe() {
 }
 
 function radiusFromMass(mass) {
-  return 18 + Math.sqrt(mass) * 1.6;
+  const safeMass = Math.max(1, Number(mass) || 1);
+  return 18 + Math.pow(safeMass, 0.75);
 }
 
 function drawDustStar(x, y, size, color, alpha = 1) {
@@ -1008,9 +1009,9 @@ function drawPlayerCore(player, r) {
 
 function getCameraScaleForMass(mass) {
   const safeMass = Math.max(10, Number(mass) || 10);
-  const growthFactor = Math.max(0, Math.log2(safeMass / 10));
-  const zoomOut = Math.min(0.12, growthFactor * 0.016);
-  return 1.42 - zoomOut;
+  const growthFactor = Math.max(0, Math.sqrt(safeMass / 10) - 1);
+  const zoomOut = Math.min(0.06, growthFactor * 0.01);
+  return 1.4 - zoomOut;
 }
 
 function getCameraPose() {
