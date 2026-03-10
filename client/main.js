@@ -87,8 +87,8 @@ const ADMIN_TWITCH_ID = "80576726";
 
 const WARNING_MARGIN = 300;
 const MASS_RADIUS_FACTOR = 0.2;
-const CAMERA_FOLLOW_LERP = 0.17;
-const CAMERA_SCALE_LERP = 0.12;
+const CAMERA_FOLLOW_LERP = 0.32;
+const CAMERA_SCALE_LERP = 0.2;
 const RENDER_MASS_LERP = 0.22;
 const RENDER_POS_LERP = 0.28;
 const backgroundStars = Array.from({ length: 260 }, () => ({
@@ -100,7 +100,6 @@ const backgroundStars = Array.from({ length: 260 }, () => ({
 }));
 const renderMassByPlayerId = new Map();
 const renderPoseByPlayerId = new Map();
-const renderPoseByFoodId = new Map();
 const cameraState = {
   initialized: false,
   camX: 0,
@@ -523,7 +522,6 @@ function showMenu() {
   myId = null;
   renderMassByPlayerId.clear();
   renderPoseByPlayerId.clear();
-  renderPoseByFoodId.clear();
   const impulse = abilityState.stellar_impulse;
   impulse.charges = impulse.maxCharges;
   impulse.nextRechargeAt = 0;
@@ -912,13 +910,15 @@ function getSmoothedPose(cache, entity, fallbackX = 0, fallbackY = 0) {
   return previous;
 }
 
+function getPlayerRenderPose(player, isLocalPlayer = false) {
+  if (isLocalPlayer) return { x: Number(player.x) || 0, y: Number(player.y) || 0 };
+  return getSmoothedPose(renderPoseByPlayerId, player, player.x, player.y);
+}
+
 function pruneRenderCaches() {
   const playerIds = new Set(state.players.map((p) => p.id));
-  const foodIds = new Set(state.foods.map((f) => f.id));
-
   for (const id of [...renderMassByPlayerId.keys()]) if (!playerIds.has(id)) renderMassByPlayerId.delete(id);
   for (const id of [...renderPoseByPlayerId.keys()]) if (!playerIds.has(id)) renderPoseByPlayerId.delete(id);
-  for (const id of [...renderPoseByFoodId.keys()]) if (!foodIds.has(id)) renderPoseByFoodId.delete(id);
 }
 function drawDustStar(x, y, size, color, alpha = 1) {
   ctx.save();
@@ -1165,33 +1165,33 @@ function getCameraPose() {
 }
 
 
-function drawImpulseSignal(player, radius) {
+function drawImpulseSignal(player, radius, nowMs, px = player.x, py = player.y) {
   const until = Number(player.impulseSignalUntil) || 0;
-  if (until <= Date.now()) return;
+  if (until <= nowMs) return;
 
   const dir = player.impulseSignalDir;
   if (!dir) return;
 
-  const t = Math.max(0, Math.min(1, (until - Date.now()) / 1000));
-  const pulse = 0.55 + 0.45 * Math.sin(Date.now() * 0.02);
+  const t = Math.max(0, Math.min(1, (until - nowMs) / 1000));
+  const pulse = 0.55 + 0.45 * Math.sin(nowMs * 0.02);
   const len = radius + 20 + (1 - t) * 28;
   const alpha = 0.32 + 0.34 * pulse;
 
   ctx.strokeStyle = `rgba(180, 245, 255, ${alpha})`;
   ctx.lineWidth = 3;
   ctx.beginPath();
-  ctx.moveTo(player.x + dir.dx * (radius * 0.45), player.y + dir.dy * (radius * 0.45));
-  ctx.lineTo(player.x + dir.dx * len, player.y + dir.dy * len);
+  ctx.moveTo(px + dir.dx * (radius * 0.45), py + dir.dy * (radius * 0.45));
+  ctx.lineTo(px + dir.dx * len, py + dir.dy * len);
   ctx.stroke();
 
   ctx.strokeStyle = `rgba(180, 245, 255, ${0.18 + 0.2 * pulse})`;
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.arc(player.x, player.y, radius * (1.02 + 0.06 * pulse), 0, Math.PI * 2);
+  ctx.arc(px, py, radius * (1.02 + 0.06 * pulse), 0, Math.PI * 2);
   ctx.stroke();
 
-  const tx = player.x + dir.dx * len;
-  const ty = player.y + dir.dy * len;
+  const tx = px + dir.dx * len;
+  const ty = py + dir.dy * len;
   drawDustStar(tx, ty, 7, `rgba(180, 245, 255, ${Math.min(0.72, alpha + 0.2)})`, 1);
 }
 
@@ -1226,8 +1226,7 @@ function draw() {
   const maxY = camY + halfViewH + cullPad;
 
   for (const f of state.foods) {
-    const pose = getSmoothedPose(renderPoseByFoodId, f, f.x, f.y);
-    if (pose.x < minX || pose.x > maxX || pose.y < minY || pose.y > maxY) continue;
+    if (f.x < minX || f.x > maxX || f.y < minY || f.y > maxY) continue;
 
     const isRare = f.kind === "rare";
     const isEjected = f.kind === "ejected";
@@ -1239,17 +1238,18 @@ function draw() {
   }
 
   const me = getMe();
+  const nowMs = Date.now();
   for (const p of state.players) {
-    const pose = getSmoothedPose(renderPoseByPlayerId, p, p.x, p.y);
+    const pose = getPlayerRenderPose(p, !!me && p.id === me.id);
     const mass = getSmoothedMass(p);
     const r = radiusFromMass(mass);
     if (pose.x + r < minX || pose.x - r > maxX || pose.y + r < minY || pose.y - r > maxY) continue;
 
     const drawPlayer = { ...p, x: pose.x, y: pose.y, mass };
     drawPlayerCore(drawPlayer, r);
-    drawImpulseSignal(drawPlayer, r);
+    drawImpulseSignal(drawPlayer, r, nowMs, pose.x, pose.y);
 
-    const nameSize = Math.max(11, r * 0.36);
+    const nameSize = Math.max(11, Math.min(72, r * 0.32));
     ctx.font = `700 ${nameSize}px system-ui`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";

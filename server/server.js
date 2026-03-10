@@ -10,7 +10,7 @@ const MAX_PLAYERS = 30;
 const WORLD_W = 4000;
 const WORLD_H = 4000;
 
-const FOOD_TARGET = 1200;
+const FOOD_TARGET = 800;
 const FOOD_RADIUS = 5;
 const COMMON_FOOD_MASS = 1;
 const RARE_FOOD_MASS = 5;
