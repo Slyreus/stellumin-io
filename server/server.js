@@ -13,7 +13,7 @@ const WORLD_H = 4000;
 const FOOD_TARGET = 1200;
 const FOOD_RADIUS = 5;
 const COMMON_FOOD_MASS = 1;
-const RARE_FOOD_MASS = 10;
+const RARE_FOOD_MASS = 5;
 const RARE_FOOD_CHANCE = 0.06;
 
 const BASE_RADIUS = 18;
@@ -51,7 +51,7 @@ const dist2 = (ax, ay, bx, by) => {
 
 function radiusFromMass(mass) {
   const safeMass = Math.max(1, Number(mass) || 1);
-  return BASE_RADIUS + Math.pow(safeMass, 0.9) * 0.14;
+  return Math.max(BASE_RADIUS, safeMass * 0.24);
 }
 
 function speedFromMass(mass) {
@@ -128,7 +128,8 @@ function makeEjectedMass({ x, y, dx, dy, mass, speed, grantSessionGain = false }
     mass,
     grantSessionGain,
     vx: dx * speed,
-    vy: dy * speed
+    vy: dy * speed,
+    justSpawned: true
   };
 }
 
@@ -670,6 +671,10 @@ setInterval(() => {
   while (foods.length < FOOD_TARGET) foods.push(makeFood());
 
   for (const f of foods) {
+    if (f.justSpawned) {
+      f.justSpawned = false;
+      continue;
+    }
     if (!f.vx && !f.vy) continue;
     f.vx *= EJECTED_DRAG;
     f.vy *= EJECTED_DRAG;
