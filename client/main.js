@@ -9,11 +9,19 @@ const twitchBtn = $("twitchBtn");
 const authStatus = $("authStatus");
 const menuAvatar = $("menuAvatar");
 const menuPseudo = $("menuPseudo");
+const menuRoleLabel = $("menuRoleLabel");
 const menuXpFill = $("menuXpFill");
 const menuXpText = $("menuXpText");
 const gameStatus = $("gameStatus");
 const hudProfile = $("hudProfile");
 const hudTop10 = $("hudTop10");
+const adminPanel = $("adminPanel");
+const adminBtn = $("adminBtn");
+const adminDropdown = $("adminDropdown");
+const adminRefreshBtn = $("adminRefreshBtn");
+const adminAddBotBtn = $("adminAddBotBtn");
+const adminNotice = $("adminNotice");
+const adminTableBody = $("adminTableBody");
 
 const pseudoLabel = $("pseudoLabel");
 const avatarImg = $("avatar");
@@ -23,6 +31,7 @@ const quitBtn = $("quitBtn");
 
 const xpAnim = $("xpAnim");
 const xpAnimAmount = $("xpAnimAmount");
+const abilityHud = $("abilityHud");
 
 const TWITCH_CLIENT_ID = "qjt85uubxukx6b0woq20r63sfermgz";
 const TWITCH_REDIRECT_URI = `${window.location.origin}${window.location.pathname}`;
@@ -62,6 +71,19 @@ let myLocal = {
   twitchId: "",
   globalXp: 0
 };
+
+const abilityState = {
+  mass_eject: { id: "mass_eject", label: "Éjection de masse", key: "C", cooldownMs: 0, charges: Infinity, maxCharges: Infinity, availableAt: 0, disabled: false },
+  stellar_impulse: { id: "stellar_impulse", label: "Impulsion stellaire", key: "Space", cooldownMs: 0, charges: 3, maxCharges: 3, rechargeMs: 30000, rechargeQueue: [], availableAt: 0, disabled: false },
+  gravitation_pull: { id: "gravitation_pull", label: "Attraction gravitationnelle", key: "—", cooldownMs: Infinity, charges: 0, maxCharges: 0, availableAt: Infinity, disabled: true },
+  orbital_comet: { id: "orbital_comet", label: "Comète orbitale", key: "—", cooldownMs: Infinity, charges: 0, maxCharges: 0, availableAt: Infinity, disabled: true }
+};
+
+let adminState = {
+  enabled: false,
+  rows: []
+};
+const ADMIN_TWITCH_ID = "80576726";
 
 const WARNING_MARGIN = 300;
 const backgroundStars = Array.from({ length: 260 }, () => ({
@@ -350,6 +372,23 @@ function computeLevelFromXp(xp) {
   return { lvl, inLevelXp: remaining, next: xpForLevel(lvl) };
 }
 
+
+function titleForLevel(level) {
+  const milestones = [
+    { min: 1, label: "Astre Naissant" },
+    { min: 10, label: "Éclat de Mellumine" },
+    { min: 20, label: "Noyau Radieux" },
+    { min: 30, label: "Gardien Nebulaire" },
+    { min: 40, label: "Souverain Stellaire" },
+    { min: 50, label: "Archonte de Mellumine" }
+  ];
+  let current = milestones[0].label;
+  for (const step of milestones) {
+    if (level >= step.min) current = step.label;
+  }
+  return current;
+}
+
 function resize() {
   const dpr = window.devicePixelRatio || 1;
   canvas.width = Math.floor(window.innerWidth * dpr);
@@ -364,6 +403,7 @@ function renderGlobalProgress(xp) {
   const { lvl, inLevelXp, next } = computeLevelFromXp(safeXp);
   menuXpText.textContent = `EXP globale · Niveau ${lvl} · ${inLevelXp} / ${next}`;
   menuXpFill.style.width = `${Math.floor((inLevelXp / next) * 100)}%`;
+  if (menuRoleLabel) menuRoleLabel.textContent = titleForLevel(lvl);
 }
 
 function renderMenuProfile() {
@@ -396,6 +436,58 @@ function renderTopHud() {
   top10List.innerHTML = markup;
 }
 
+function isAdminUser() {
+  return myLocal.twitchId === ADMIN_TWITCH_ID;
+}
+
+function setAdminNotice(text = "") {
+  if (!adminNotice) return;
+  adminNotice.textContent = text;
+}
+
+function renderAdminTable() {
+  if (!adminTableBody) return;
+  if (!adminState.rows.length) {
+    adminTableBody.innerHTML = '<tr><td colspan="4">Aucun joueur/bot actif.</td></tr>';
+    return;
+  }
+
+  adminTableBody.innerHTML = adminState.rows.map((row) => {
+    const safeName = (row.name || "—").replace(/[<>]/g, "");
+    const typeLabel = row.kind === "bot" ? "Bot" : "Joueur";
+    const actions = `
+      <div class="adminRowActions">
+        <button data-admin-action="ban" data-player-id="${row.id}">Bannir</button>
+        <button data-admin-action="kick" data-player-id="${row.id}">Expulser</button>
+        <button data-admin-action="mass_down" data-player-id="${row.id}">-100 masses</button>
+        <button data-admin-action="mass_up" data-player-id="${row.id}">+100 masses</button>
+      </div>
+    `;
+    return `<tr><td>${safeName}</td><td>${typeLabel}</td><td>${Math.floor(row.mass || 0)}</td><td>${actions}</td></tr>`;
+  }).join("");
+}
+
+function requestAdminRoster() {
+  if (!isAdminUser() || !ws || ws.readyState !== 1) return;
+  ws.send(JSON.stringify({ type: "admin_roster" }));
+}
+
+function sendAdminAction(action, playerId) {
+  if (!isAdminUser() || !ws || ws.readyState !== 1 || !playerId) return;
+  ws.send(JSON.stringify({ type: "admin_action", action, playerId }));
+}
+
+function renderAdminPanel() {
+  if (!adminPanel) return;
+  const canAdmin = isAdminUser() && adminState.enabled;
+  adminPanel.style.display = canAdmin ? "block" : "none";
+  if (!canAdmin) {
+    if (adminDropdown) adminDropdown.style.display = "none";
+    adminState.rows = [];
+    renderAdminTable();
+  }
+}
+
 function hydrateProfile(profile) {
   if (!profile) return;
   myLocal.name = profile.login;
@@ -403,6 +495,10 @@ function hydrateProfile(profile) {
   myLocal.twitchId = profile.id;
   renderMenuProfile();
   renderHud();
+  renderAdminPanel();
+  if (ws && ws.readyState === 1 && myLocal.twitchId) {
+    ws.send(JSON.stringify({ type: "admin_auth", twitchId: myLocal.twitchId }));
+  }
 }
 
 function showMenu() {
@@ -413,6 +509,7 @@ function showMenu() {
   quitBtn.style.display = "none";
   hudProfile.style.display = "none";
   hudTop10.style.display = "none";
+  if (abilityHud) abilityHud.style.display = "none";
 }
 
 function hideMenu() {
@@ -422,6 +519,7 @@ function hideMenu() {
   quitBtn.style.display = "block";
   hudProfile.style.display = "flex";
   hudTop10.style.display = "flex";
+  if (abilityHud) abilityHud.style.display = "grid";
 }
 
 function connectLobby(serverUrl) {
@@ -432,11 +530,34 @@ function connectLobby(serverUrl) {
     if (profile) {
       hydrateProfile(profile);
       sendProgressRequest();
+      ws.send(JSON.stringify({ type: "admin_auth", twitchId: profile.id }));
     }
   });
 
   ws.addEventListener("message", (ev) => {
     const msg = JSON.parse(ev.data);
+
+    if (msg.type === "admin_status") {
+      adminState.enabled = !!msg.enabled;
+      if (!adminState.enabled) {
+        adminState.rows = [];
+        renderAdminTable();
+      }
+      renderAdminPanel();
+      return;
+    }
+
+    if (msg.type === "admin_roster") {
+      adminState.rows = Array.isArray(msg.rows) ? msg.rows : [];
+      renderAdminTable();
+      return;
+    }
+
+    if (msg.type === "admin_result") {
+      setAdminNotice(msg.message || "Action admin exécutée.");
+      requestAdminRoster();
+      return;
+    }
 
     if (msg.type === "status") {
       statusState = {
@@ -455,7 +576,8 @@ function connectLobby(serverUrl) {
     }
 
     if (msg.type === "join_rejected") {
-      authStatus.textContent = "Serveur plein (30 joueurs). Réessaie plus tard.";
+      if (msg.reason === "banned") authStatus.textContent = "Compte banni du serveur.";
+      else authStatus.textContent = "Serveur plein (30 joueurs). Réessaie plus tard.";
       showMenu();
       return;
     }
@@ -499,6 +621,8 @@ function connectLobby(serverUrl) {
   ws.addEventListener("close", () => {
     inGame = false;
     myId = null;
+    adminState.enabled = false;
+    renderAdminPanel();
     renderStatus();
     setTimeout(() => connectLobby(serverUrl), 1200);
   });
@@ -551,16 +675,125 @@ function animateXpGain(amount, totalAfter) {
   setTimeout(() => xpAnim.classList.remove("show"), 2600);
 }
 
-let input = { dx: 0, dy: 0 };
+function consumeImpulseCharge() {
+  const ability = abilityState.stellar_impulse;
+  const now = Date.now();
+  ability.rechargeQueue = ability.rechargeQueue.filter((t) => t > now);
+  const available = Math.max(0, ability.maxCharges - ability.rechargeQueue.length);
+  if (available <= 0) return false;
+  ability.rechargeQueue.push(now + ability.rechargeMs);
+  return true;
+}
+
+function computeImpulseCharges() {
+  const ability = abilityState.stellar_impulse;
+  const now = Date.now();
+  ability.rechargeQueue = ability.rechargeQueue.filter((t) => t > now);
+  return Math.max(0, ability.maxCharges - ability.rechargeQueue.length);
+}
+
+function getCooldownText(ability) {
+  if (ability.disabled) return "CD: —";
+  if (ability.id === "stellar_impulse") {
+    const charges = computeImpulseCharges();
+    if (charges >= ability.maxCharges) return "CD: 0s";
+    const next = Math.min(...ability.rechargeQueue);
+    const sec = Math.max(0, Math.ceil((next - Date.now()) / 1000));
+    return `CD: ${sec}s`;
+  }
+  return "CD: 0s";
+}
+
+function renderAbilityHud() {
+  if (!abilityHud) return;
+  const slots = abilityHud.querySelectorAll(".abilitySlot");
+  for (const slot of slots) {
+    const id = slot.dataset.ability;
+    const ability = abilityState[id];
+    if (!ability) continue;
+
+    const chargesEl = slot.querySelector(".abilityCharges");
+    const cooldownEl = slot.querySelector(".abilityCooldown");
+    const stateEl = slot.querySelector(".abilityState");
+
+    slot.classList.remove("is-cooldown", "is-unavailable");
+
+    if (ability.disabled) {
+      chargesEl.textContent = "Charges: —";
+      cooldownEl.textContent = "CD: —";
+      stateEl.textContent = "Bientôt disponible";
+      slot.classList.add("is-unavailable");
+      continue;
+    }
+
+    if (ability.id === "mass_eject") {
+      chargesEl.textContent = "Charges: ∞";
+      cooldownEl.textContent = "CD: 0s";
+      stateEl.textContent = "Prêt";
+      continue;
+    }
+
+    if (ability.id === "stellar_impulse") {
+      const charges = computeImpulseCharges();
+      chargesEl.textContent = `Charges: ${charges}/${ability.maxCharges}`;
+      cooldownEl.textContent = getCooldownText(ability);
+      if (charges > 0) {
+        stateEl.textContent = "Prêt";
+      } else {
+        stateEl.textContent = "Cooldown";
+        slot.classList.add("is-cooldown");
+      }
+    }
+  }
+}
+
+function tryUseAbility(abilityId) {
+  if (!inGame || !myId || !ws || ws.readyState !== 1) return;
+
+  const dirX = input.dx || 1;
+  const dirY = input.dy || 0;
+
+  if (abilityId === "stellar_impulse") {
+    const ok = consumeImpulseCharge();
+    if (!ok) {
+      renderAbilityHud();
+      return;
+    }
+  }
+
+  ws.send(JSON.stringify({
+    type: "ability_use",
+    ability: abilityId,
+    dx: dirX,
+    dy: dirY
+  }));
+
+  renderAbilityHud();
+}
+
+
+let input = { dx: 0, dy: 0, mag: 0 };
 window.addEventListener("mousemove", (e) => {
   if (!inGame) return;
   const cx = window.innerWidth / 2;
   const cy = window.innerHeight / 2;
   const vx = e.clientX - cx;
   const vy = e.clientY - cy;
-  const len = Math.hypot(vx, vy) || 1;
-  input.dx = vx / len;
-  input.dy = vy / len;
+  const len = Math.hypot(vx, vy);
+
+  if (len <= 8) {
+    input.dx = 0;
+    input.dy = 0;
+    input.mag = 0;
+    return;
+  }
+
+  const norm = len || 1;
+  input.dx = vx / norm;
+  input.dy = vy / norm;
+
+  const maxReach = Math.min(window.innerWidth, window.innerHeight) * 0.44;
+  input.mag = Math.max(0, Math.min(1, len / maxReach));
 });
 
 window.addEventListener("wheel", (e) => {
@@ -568,9 +801,19 @@ window.addEventListener("wheel", (e) => {
   e.preventDefault();
 }, { passive: false });
 
+window.addEventListener("keydown", (e) => {
+  if (e.repeat) return;
+  if (e.code === "KeyC") {
+    tryUseAbility("mass_eject");
+  } else if (e.code === "Space") {
+    e.preventDefault();
+    tryUseAbility("stellar_impulse");
+  }
+});
+
 function sendInput() {
   if (!inGame || !ws || ws.readyState !== 1 || !myId) return;
-  ws.send(JSON.stringify({ type: "input", dx: input.dx, dy: input.dy }));
+  ws.send(JSON.stringify({ type: "input", dx: input.dx, dy: input.dy, mag: input.mag }));
 }
 
 function getMe() {
@@ -578,7 +821,8 @@ function getMe() {
 }
 
 function radiusFromMass(mass) {
-  return 18 + Math.sqrt(mass) * 1.6;
+  const safeMass = Math.max(1, Number(mass) || 1);
+  return 18 + Math.pow(safeMass, 0.9) * 0.14;
 }
 
 function drawDustStar(x, y, size, color, alpha = 1) {
@@ -727,24 +971,19 @@ function getAvatarVisual(avatarUrl) {
 }
 
 function drawPlayerRadiance(player, r, color) {
+  const massTier = Math.floor((Number(player.mass) || 0) / 1000);
+  const tierBoost = 1 + massTier * 0.14;
   const flow = 0.92 + 0.08 * Math.sin(Date.now() * 0.003 + player.mass * 0.015);
-  const outerRadius = r * 1.46 * flow;
+  const outerRadius = r * (1.46 + massTier * 0.06) * flow;
 
-  const aura = ctx.createRadialGradient(player.x, player.y, r * 0.72, player.x, player.y, outerRadius);
-  aura.addColorStop(0, `rgba(${color.r}, ${color.g}, ${color.b}, 0.25)`);
-  aura.addColorStop(0.7, `rgba(${color.r}, ${color.g}, ${color.b}, 0.11)`);
+  const aura = ctx.createRadialGradient(player.x, player.y, r * 0.7, player.x, player.y, outerRadius);
+  aura.addColorStop(0, `rgba(${color.r}, ${color.g}, ${color.b}, ${0.24 * tierBoost})`);
+  aura.addColorStop(0.6, `rgba(${color.r}, ${color.g}, ${color.b}, ${0.11 * tierBoost})`);
   aura.addColorStop(1, `rgba(${color.r}, ${color.g}, ${color.b}, 0)`);
   ctx.fillStyle = aura;
   ctx.beginPath();
   ctx.arc(player.x, player.y, outerRadius, 0, Math.PI * 2);
   ctx.fill();
-
-  const ringRadius = r * (1.08 + 0.02 * Math.sin(Date.now() * 0.004 + player.mass));
-  ctx.strokeStyle = `rgba(${Math.min(255, color.r + 36)}, ${Math.min(255, color.g + 36)}, ${Math.min(255, color.b + 36)}, 0.32)`;
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.arc(player.x, player.y, ringRadius, 0, Math.PI * 2);
-  ctx.stroke();
 }
 
 function drawPlayerCore(player, r) {
@@ -784,9 +1023,11 @@ function drawPlayerCore(player, r) {
 
 function getCameraScaleForMass(mass) {
   const safeMass = Math.max(10, Number(mass) || 10);
-  const growthFactor = Math.max(0, Math.log2(safeMass / 10));
-  const zoomOut = Math.min(0.12, growthFactor * 0.016);
-  return 1.42 - zoomOut;
+  const radius = radiusFromMass(safeMass);
+  const referenceRadius = radiusFromMass(10);
+  const ratio = Math.max(1, radius / referenceRadius);
+  const scale = 1.46 / Math.pow(ratio, 0.2);
+  return Math.max(0.86, Math.min(1.5, scale));
 }
 
 function getCameraPose() {
@@ -814,6 +1055,44 @@ function getCameraPose() {
 }
 
 
+function drawImpulseSignal(player, radius) {
+  const until = Number(player.impulseSignalUntil) || 0;
+  if (until <= Date.now()) return;
+
+  const dir = player.impulseSignalDir;
+  if (!dir) return;
+
+  const t = Math.max(0, Math.min(1, (until - Date.now()) / 1000));
+  const pulse = 0.55 + 0.45 * Math.sin(Date.now() * 0.02);
+  const len = radius + 20 + (1 - t) * 28;
+  const alpha = 0.32 + 0.34 * pulse;
+
+  ctx.strokeStyle = `rgba(180, 245, 255, ${alpha})`;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(player.x + dir.dx * (radius * 0.45), player.y + dir.dy * (radius * 0.45));
+  ctx.lineTo(player.x + dir.dx * len, player.y + dir.dy * len);
+  ctx.stroke();
+
+  ctx.strokeStyle = `rgba(180, 245, 255, ${0.18 + 0.2 * pulse})`;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(player.x, player.y, radius * (1.02 + 0.06 * pulse), 0, Math.PI * 2);
+  ctx.stroke();
+
+  const tx = player.x + dir.dx * len;
+  const ty = player.y + dir.dy * len;
+  drawDustStar(tx, ty, 7, `rgba(180, 245, 255, ${Math.min(0.72, alpha + 0.2)})`, 1);
+}
+
+
+function getContrastTextForPlayer(player) {
+  const visual = getAvatarVisual(player.avatar);
+  const c = visual.color || { r: 180, g: 180, b: 180 };
+  const luminance = (0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b) / 255;
+  return luminance > 0.54 ? "#0b1020" : "#f8fafc";
+}
+
 function draw() {
   const { camX, camY, scale } = getCameraPose();
   drawBackground(camX, camY);
@@ -830,8 +1109,11 @@ function draw() {
 
   for (const f of state.foods) {
     const isRare = f.kind === "rare";
-    const size = isRare ? f.r * 1.15 : f.r * 0.95;
-    const color = isRare ? "rgba(255, 228, 120, 0.96)" : "rgba(176, 120, 255, 0.9)";
+    const isEjected = f.kind === "ejected";
+    const size = isRare ? f.r * 1.15 : (isEjected ? f.r * 1.05 : f.r * 0.95);
+    const color = isRare
+      ? "rgba(255, 228, 120, 0.96)"
+      : (isEjected ? "rgba(128, 245, 255, 0.95)" : "rgba(176, 120, 255, 0.9)");
     drawDustStar(f.x, f.y, size, color);
   }
 
@@ -839,11 +1121,18 @@ function draw() {
   for (const p of state.players) {
     const r = radiusFromMass(p.mass);
     drawPlayerCore(p, r);
+    drawImpulseSignal(p, r);
 
-    ctx.font = `${Math.max(10, Math.min(20, r * 0.4))}px system-ui`;
+    const nameSize = Math.max(10, Math.min(18, r * 0.36));
+    ctx.font = `700 ${nameSize}px system-ui`;
     ctx.textAlign = "center";
-    ctx.fillStyle = "rgba(8, 12, 24, 0.88)";
-    ctx.fillText(p.name, p.x, p.y + r + 16);
+    ctx.textBaseline = "middle";
+    const textColor = getContrastTextForPlayer(p);
+    ctx.strokeStyle = textColor === "#f8fafc" ? "rgba(0,0,0,0.45)" : "rgba(255,255,255,0.35)";
+    ctx.lineWidth = 2;
+    ctx.strokeText(p.name, p.x, p.y);
+    ctx.fillStyle = textColor;
+    ctx.fillText(p.name, p.x, p.y);
 
     if (me && p.id === me.id) drawBoundaryWarning(p, r);
   }
@@ -867,6 +1156,7 @@ twitchBtn.addEventListener("click", () => {
     updateAuthStatus(null);
     renderMenuProfile();
     renderHud();
+    renderAdminPanel();
     return;
   }
 
@@ -889,6 +1179,39 @@ playBtn.addEventListener("click", () => {
 
 quitBtn.addEventListener("click", leaveGame);
 
+
+if (adminBtn) {
+  adminBtn.addEventListener("click", () => {
+    if (!isAdminUser()) return;
+    const opened = adminDropdown.style.display === "block";
+    adminDropdown.style.display = opened ? "none" : "block";
+    if (!opened) requestAdminRoster();
+  });
+}
+
+if (adminRefreshBtn) {
+  adminRefreshBtn.addEventListener("click", requestAdminRoster);
+}
+
+if (adminAddBotBtn) {
+  adminAddBotBtn.addEventListener("click", () => {
+    if (!isAdminUser() || !ws || ws.readyState !== 1) return;
+    ws.send(JSON.stringify({ type: "admin_add_bot" }));
+  });
+}
+
+if (adminTableBody) {
+  adminTableBody.addEventListener("click", (e) => {
+    const target = e.target;
+    if (!(target instanceof HTMLElement)) return;
+    const action = target.dataset.adminAction;
+    const playerId = target.dataset.playerId;
+    if (!action || !playerId) return;
+    sendAdminAction(action, playerId);
+  });
+}
+
+
 (async () => {
   const serverUrl = getServerUrl();
   connectLobby(serverUrl);
@@ -910,4 +1233,10 @@ quitBtn.addEventListener("click", leaveGame);
   if (!animationHandle) animationHandle = requestAnimationFrame(draw);
 
   if (!inputTimer) inputTimer = setInterval(sendInput, 50);
+  setInterval(renderAbilityHud, 120);
+  renderAbilityHud();
+  renderAdminPanel();
+  if (ws && ws.readyState === 1 && myLocal.twitchId) {
+    ws.send(JSON.stringify({ type: "admin_auth", twitchId: myLocal.twitchId }));
+  }
 })();
