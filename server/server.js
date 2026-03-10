@@ -13,7 +13,7 @@ const WORLD_H = 4000;
 const FOOD_TARGET = 1200;
 const FOOD_RADIUS = 5;
 const COMMON_FOOD_MASS = 1;
-const RARE_FOOD_MASS = 10;
+const RARE_FOOD_MASS = 5;
 const RARE_FOOD_CHANCE = 0.06;
 
 const BASE_RADIUS = 18;
@@ -51,7 +51,7 @@ const dist2 = (ax, ay, bx, by) => {
 
 function radiusFromMass(mass) {
   const safeMass = Math.max(1, Number(mass) || 1);
-  return BASE_RADIUS + Math.pow(safeMass, 0.9) * 0.14;
+  return Math.max(BASE_RADIUS, safeMass * 0.24);
 }
 
 function speedFromMass(mass) {
@@ -109,7 +109,8 @@ function pickSpawnPoint() {
 
 
 function normalizeDir(dx, dy) {
-  const len = Math.hypot(dx, dy) || 1;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-6) return { dx: 1, dy: 0 };
   return { dx: dx / len, dy: dy / len };
 }
 
@@ -127,7 +128,8 @@ function makeEjectedMass({ x, y, dx, dy, mass, speed, grantSessionGain = false }
     mass,
     grantSessionGain,
     vx: dx * speed,
-    vy: dy * speed
+    vy: dy * speed,
+    justSpawned: true
   };
 }
 
@@ -143,7 +145,7 @@ function splitMass(totalMass, targetChunk) {
   return chunks;
 }
 
-function spawnEjectedChunks(player, dir, totalMass, speed, distance, jitter = 0.06) {
+function spawnEjectedChunks(player, dir, totalMass, speed, jitter = 0.06) {
   const pr = radiusFromMass(player.mass);
   const chunks = splitMass(totalMass, IMPULSE_CHUNK_TARGET);
   for (const mass of chunks) {
@@ -151,11 +153,14 @@ function spawnEjectedChunks(player, dir, totalMass, speed, distance, jitter = 0.
     const jx = dir.dx + offset;
     const jy = dir.dy - offset;
     const nd = normalizeDir(jx, jy);
-    const distOffset = rand(-6, 10);
+
+    const chunkRadius = radiusFromLooseMass(mass);
+    const edgeDistance = pr + chunkRadius + 2 + rand(0, 2);
     const speedScale = rand(0.9, 1.08);
+
     foods.push(makeEjectedMass({
-      x: clamp(player.x + nd.dx * (pr + distance + distOffset), -WORLD_W / 2, WORLD_W / 2),
-      y: clamp(player.y + nd.dy * (pr + distance + distOffset), -WORLD_H / 2, WORLD_H / 2),
+      x: clamp(player.x + nd.dx * edgeDistance, -WORLD_W / 2, WORLD_W / 2),
+      y: clamp(player.y + nd.dy * edgeDistance, -WORLD_H / 2, WORLD_H / 2),
       dx: nd.dx,
       dy: nd.dy,
       mass,
@@ -181,7 +186,7 @@ function castMassEject(player, dir) {
   if (player.mass - cost < 6) return false;
 
   player.mass -= cost;
-  spawnEjectedChunks(player, dir, cost, MASS_EJECT_SPEED, 10, 0.04);
+  spawnEjectedChunks(player, dir, cost, MASS_EJECT_SPEED, 0.04);
   return true;
 }
 
@@ -215,7 +220,7 @@ function resolvePendingImpulses(player) {
     if (player.mass - cost < 6) continue;
 
     player.mass -= cost;
-    spawnEjectedChunks(player, { dx: -pending.dir.dx, dy: -pending.dir.dy }, cost, MASS_EJECT_SPEED * 0.72, 12, 0.18);
+    spawnEjectedChunks(player, { dx: -pending.dir.dx, dy: -pending.dir.dy }, cost, MASS_EJECT_SPEED * 0.72, 0.18);
     player.vx += pending.dir.dx * IMPULSE_PUSH;
     player.vy += pending.dir.dy * IMPULSE_PUSH;
   }
@@ -397,7 +402,10 @@ function snapshotForClient() {
       avatar: p.avatar,
       x: p.x,
       y: p.y,
+      vx: p.vx,
+      vy: p.vy,
       mass: p.mass,
+      radius: radiusFromMass(p.mass),
       impulseSignalUntil: p.impulseSignal?.until || 0,
       impulseSignalDir: p.impulseSignal?.dir || null
     });
@@ -663,6 +671,10 @@ setInterval(() => {
   while (foods.length < FOOD_TARGET) foods.push(makeFood());
 
   for (const f of foods) {
+    if (f.justSpawned) {
+      f.justSpawned = false;
+      continue;
+    }
     if (!f.vx && !f.vy) continue;
     f.vx *= EJECTED_DRAG;
     f.vy *= EJECTED_DRAG;
