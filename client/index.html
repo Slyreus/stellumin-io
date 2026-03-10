@@ -36,6 +36,26 @@
         <ol id="top10List"></ol>
       </aside>
 
+
+      <div id="adminPanel" class="adminPanel" style="display:none;">
+        <button id="adminBtn" class="adminBtn" type="button">Admin</button>
+        <div id="adminDropdown" class="adminDropdown" style="display:none;">
+          <div class="adminActions">
+            <button id="adminRefreshBtn" type="button">Voir joueurs & bots</button>
+            <button id="adminAddBotBtn" type="button">Ajouter un bot</button>
+          </div>
+          <div id="adminNotice" class="adminNotice"></div>
+          <div class="adminTableWrap">
+            <table class="adminTable">
+              <thead>
+                <tr><th>Nom</th><th>Type</th><th>Masse</th><th>Actions</th></tr>
+              </thead>
+              <tbody id="adminTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
       <button id="quitBtn" class="quitBtn">Quitter</button>
     </header>
 
@@ -76,6 +96,29 @@
     <div id="xpAnim" class="xpAnim">
       <div class="xpAnimDust">✦ ✦ ✦</div>
       <div id="xpAnimAmount" class="xpAnimAmount">+0 EXP</div>
+    </div>
+
+    <div id="abilityHud" class="abilityHud" aria-label="Compétences joueur">
+      <div class="abilitySlot" data-ability="mass_eject">
+        <div class="abilityHeader"><strong>Éjection de masse</strong><span class="abilityKey">C</span></div>
+        <div class="abilityMeta"><span class="abilityCharges">Charges: ∞</span><span class="abilityCooldown">CD: 0s</span></div>
+        <div class="abilityState">Prêt</div>
+      </div>
+      <div class="abilitySlot" data-ability="stellar_impulse">
+        <div class="abilityHeader"><strong>Impulsion stellaire</strong><span class="abilityKey">Space</span></div>
+        <div class="abilityMeta"><span class="abilityCharges">Charges: 3/3</span><span class="abilityCooldown">CD: 0s</span></div>
+        <div class="abilityState">Prêt</div>
+      </div>
+      <div class="abilitySlot disabled" data-ability="gravitation_pull">
+        <div class="abilityHeader"><strong>Attraction gravitationnelle</strong><span class="abilityKey">—</span></div>
+        <div class="abilityMeta"><span class="abilityCharges">Charges: —</span><span class="abilityCooldown">CD: —</span></div>
+        <div class="abilityState">Bientôt disponible</div>
+      </div>
+      <div class="abilitySlot disabled" data-ability="orbital_comet">
+        <div class="abilityHeader"><strong>Comète orbitale</strong><span class="abilityKey">—</span></div>
+        <div class="abilityMeta"><span class="abilityCharges">Charges: —</span><span class="abilityCooldown">CD: —</span></div>
+        <div class="abilityState">Bientôt disponible</div>
+      </div>
     </div>
   </div>
 
