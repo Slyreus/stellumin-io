@@ -254,3 +254,48 @@ canvas{ display:block; width:100vw; height:100vh; }
 .abilityState{ margin-top:4px; font-size:11px; font-weight:800; color:#9df9c8; white-space:nowrap; }
 .abilitySlot.is-cooldown .abilityState{ color:#ffd48a; }
 .abilitySlot.is-unavailable .abilityState{ color:#ff9ca0; }
+
+
+.adminPanel{
+  position:fixed;
+  top:124px;
+  left:16px;
+  pointer-events:auto;
+  z-index:35;
+}
+.adminBtn{
+  border:1px solid rgba(180,245,255,.55);
+  background:rgba(20,36,56,.7);
+  color:var(--text);
+  border-radius:10px;
+  font-size:12px;
+  font-weight:700;
+  padding:5px 9px;
+  cursor:pointer;
+}
+.adminDropdown{
+  margin-top:8px;
+  width:560px;
+  max-height:62vh;
+  overflow:auto;
+  border:1px solid rgba(180,245,255,.35);
+  border-radius:10px;
+  background:rgba(8,13,24,.92);
+  padding:8px;
+}
+.adminActions{ display:flex; gap:8px; }
+.adminActions button{
+  border:1px solid rgba(255,255,255,.2);
+  background:rgba(255,255,255,.08);
+  color:var(--text);
+  border-radius:8px;
+  font-size:12px;
+  padding:6px 8px;
+  cursor:pointer;
+}
+.adminNotice{ margin-top:6px; min-height:16px; font-size:12px; color:var(--muted); }
+.adminTableWrap{ margin-top:6px; }
+.adminTable{ width:100%; border-collapse:collapse; font-size:12px; }
+.adminTable th,.adminTable td{ border-bottom:1px solid rgba(255,255,255,.12); padding:6px; text-align:left; }
+.adminRowActions{ display:flex; gap:5px; flex-wrap:wrap; }
+.adminRowActions button{ font-size:11px; padding:4px 6px; border-radius:6px; border:1px solid rgba(255,255,255,.2); background:rgba(255,255,255,.08); color:var(--text); cursor:pointer; }

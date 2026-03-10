@@ -36,6 +36,8 @@ const IMPULSE_CHARGES = 3;
 const IMPULSE_RECHARGE_MS = 30000;
 const IMPULSE_CHUNK_TARGET = 22;
 
+const ADMIN_TWITCH_ID = "80576726";
+
 const DATA_DIR = path.resolve("./data");
 const PLAYER_STORE_PATH = path.join(DATA_DIR, "player-progress.json");
 
@@ -228,6 +230,8 @@ const sockets = new Map();
 const playerSocketById = new Map();
 const pendingEliminations = new Map();
 const progressByAccount = new Map();
+const wsMeta = new Map();
+const bannedAccounts = new Set();
 let saveTimer = null;
 
 let foods = [];
@@ -413,6 +417,73 @@ function snapshotForClient() {
   };
 }
 
+
+function isAdminSocket(ws) {
+  return wsMeta.get(ws)?.isAdmin === true;
+}
+
+function adminRosterRows() {
+  const rows = [];
+  for (const p of players.values()) {
+    rows.push({ id: p.id, name: p.name, kind: p.kind || "player", mass: Math.floor(p.mass) });
+  }
+  return rows;
+}
+
+function sendAdminRoster(ws) {
+  sendToSocket(ws, { type: "admin_roster", rows: adminRosterRows() });
+}
+
+function forceRemovePlayer(playerId, reason = "kicked") {
+  const ws = playerSocketById.get(playerId);
+  if (ws) {
+    sockets.delete(ws);
+    sendToSocket(ws, { type: "run_end", reason, earnedXp: 0, totalXp: 0 });
+  }
+  players.delete(playerId);
+  playerSocketById.delete(playerId);
+}
+
+function handleAdminAction(ws, action, playerId) {
+  if (!isAdminSocket(ws)) {
+    sendToSocket(ws, { type: "admin_result", ok: false, message: "Action refusée." });
+    return;
+  }
+
+  const player = players.get(playerId);
+  if (!player) {
+    sendToSocket(ws, { type: "admin_result", ok: false, message: "Cible introuvable." });
+    return;
+  }
+
+  if (action === "kick") {
+    forceRemovePlayer(playerId, "kicked_by_admin");
+    sendToSocket(ws, { type: "admin_result", ok: true, message: `${player.name} expulsé.` });
+    return;
+  }
+
+  if (action === "ban") {
+    if (player.accountId) bannedAccounts.add(player.accountId);
+    forceRemovePlayer(playerId, "banned_by_admin");
+    sendToSocket(ws, { type: "admin_result", ok: true, message: `${player.name} banni.` });
+    return;
+  }
+
+  if (action === "mass_down") {
+    player.mass = Math.max(6, player.mass - 100);
+    sendToSocket(ws, { type: "admin_result", ok: true, message: `${player.name} -100 masses.` });
+    return;
+  }
+
+  if (action === "mass_up") {
+    player.mass += 100;
+    sendToSocket(ws, { type: "admin_result", ok: true, message: `${player.name} +100 masses.` });
+    return;
+  }
+
+  sendToSocket(ws, { type: "admin_result", ok: false, message: "Action inconnue." });
+}
+
 function broadcast(obj) {
   const data = JSON.stringify(obj);
   for (const client of wss.clients) {
@@ -431,6 +502,7 @@ function removePlayerForSocket(ws, reason = "left") {
 }
 
 wss.on("connection", (ws) => {
+  wsMeta.set(ws, { isAdmin: false, twitchId: "" });
   sendToSocket(ws, { type: "hello", msg: "stellumin-server" });
   sendToSocket(ws, statusForClient());
   sendToSocket(ws, snapshotForClient());
@@ -440,6 +512,34 @@ wss.on("connection", (ws) => {
     try {
       msg = JSON.parse(raw.toString());
     } catch {
+      return;
+    }
+
+    if (msg.type === "admin_auth") {
+      const twitchId = typeof msg.twitchId === "string" ? msg.twitchId.slice(0, 64) : "";
+      const isAdmin = twitchId === ADMIN_TWITCH_ID;
+      wsMeta.set(ws, { isAdmin, twitchId });
+      sendToSocket(ws, { type: "admin_status", enabled: isAdmin });
+      return;
+    }
+
+    if (msg.type === "admin_roster") {
+      if (!isAdminSocket(ws)) return;
+      sendAdminRoster(ws);
+      return;
+    }
+
+    if (msg.type === "admin_action") {
+      const action = typeof msg.action === "string" ? msg.action : "";
+      const playerId = typeof msg.playerId === "string" ? msg.playerId : "";
+      handleAdminAction(ws, action, playerId);
+      broadcast(statusForClient());
+      return;
+    }
+
+    if (msg.type === "admin_add_bot") {
+      if (!isAdminSocket(ws)) return;
+      sendToSocket(ws, { type: "admin_result", ok: true, message: "Ajout bot bientôt disponible." });
       return;
     }
 
@@ -474,6 +574,10 @@ wss.on("connection", (ws) => {
       const name = typeof msg.name === "string" ? msg.name.slice(0, 20) : "Player";
       const avatar = typeof msg.avatar === "string" ? msg.avatar.slice(0, 400) : "";
       const twitchId = typeof msg.twitchId === "string" ? msg.twitchId.slice(0, 64) : "";
+      if (twitchId && bannedAccounts.has(twitchId)) {
+        sendToSocket(ws, { type: "join_rejected", reason: "banned" });
+        return;
+      }
       const spawn = pickSpawnPoint();
 
       const p = {
@@ -486,6 +590,7 @@ wss.on("connection", (ws) => {
         vx: 0,
         vy: 0,
         mass: START_MASS,
+        kind: "player",
         sessionMassGained: 0,
         input: { dx: 0, dy: 0, mag: 1 },
         impulseRecharge: [],
@@ -543,6 +648,7 @@ wss.on("connection", (ws) => {
 
   ws.on("close", () => {
     removePlayerForSocket(ws, "left");
+    wsMeta.delete(ws);
     broadcast(statusForClient());
   });
 });

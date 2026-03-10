@@ -14,6 +14,13 @@ const menuXpText = $("menuXpText");
 const gameStatus = $("gameStatus");
 const hudProfile = $("hudProfile");
 const hudTop10 = $("hudTop10");
+const adminPanel = $("adminPanel");
+const adminBtn = $("adminBtn");
+const adminDropdown = $("adminDropdown");
+const adminRefreshBtn = $("adminRefreshBtn");
+const adminAddBotBtn = $("adminAddBotBtn");
+const adminNotice = $("adminNotice");
+const adminTableBody = $("adminTableBody");
 
 const pseudoLabel = $("pseudoLabel");
 const avatarImg = $("avatar");
@@ -70,6 +77,12 @@ const abilityState = {
   gravitation_pull: { id: "gravitation_pull", label: "Attraction gravitationnelle", key: "—", cooldownMs: Infinity, charges: 0, maxCharges: 0, availableAt: Infinity, disabled: true },
   orbital_comet: { id: "orbital_comet", label: "Comète orbitale", key: "—", cooldownMs: Infinity, charges: 0, maxCharges: 0, availableAt: Infinity, disabled: true }
 };
+
+let adminState = {
+  enabled: false,
+  rows: []
+};
+const ADMIN_TWITCH_ID = "80576726";
 
 const WARNING_MARGIN = 300;
 const backgroundStars = Array.from({ length: 260 }, () => ({
@@ -404,6 +417,58 @@ function renderTopHud() {
   top10List.innerHTML = markup;
 }
 
+function isAdminUser() {
+  return myLocal.twitchId === ADMIN_TWITCH_ID;
+}
+
+function setAdminNotice(text = "") {
+  if (!adminNotice) return;
+  adminNotice.textContent = text;
+}
+
+function renderAdminTable() {
+  if (!adminTableBody) return;
+  if (!adminState.rows.length) {
+    adminTableBody.innerHTML = '<tr><td colspan="4">Aucun joueur/bot actif.</td></tr>';
+    return;
+  }
+
+  adminTableBody.innerHTML = adminState.rows.map((row) => {
+    const safeName = (row.name || "—").replace(/[<>]/g, "");
+    const typeLabel = row.kind === "bot" ? "Bot" : "Joueur";
+    const actions = `
+      <div class="adminRowActions">
+        <button data-admin-action="ban" data-player-id="${row.id}">Bannir</button>
+        <button data-admin-action="kick" data-player-id="${row.id}">Expulser</button>
+        <button data-admin-action="mass_down" data-player-id="${row.id}">-100 masses</button>
+        <button data-admin-action="mass_up" data-player-id="${row.id}">+100 masses</button>
+      </div>
+    `;
+    return `<tr><td>${safeName}</td><td>${typeLabel}</td><td>${Math.floor(row.mass || 0)}</td><td>${actions}</td></tr>`;
+  }).join("");
+}
+
+function requestAdminRoster() {
+  if (!isAdminUser() || !ws || ws.readyState !== 1) return;
+  ws.send(JSON.stringify({ type: "admin_roster" }));
+}
+
+function sendAdminAction(action, playerId) {
+  if (!isAdminUser() || !ws || ws.readyState !== 1 || !playerId) return;
+  ws.send(JSON.stringify({ type: "admin_action", action, playerId }));
+}
+
+function renderAdminPanel() {
+  if (!adminPanel) return;
+  const canAdmin = isAdminUser() && adminState.enabled;
+  adminPanel.style.display = canAdmin ? "block" : "none";
+  if (!canAdmin) {
+    if (adminDropdown) adminDropdown.style.display = "none";
+    adminState.rows = [];
+    renderAdminTable();
+  }
+}
+
 function hydrateProfile(profile) {
   if (!profile) return;
   myLocal.name = profile.login;
@@ -411,6 +476,10 @@ function hydrateProfile(profile) {
   myLocal.twitchId = profile.id;
   renderMenuProfile();
   renderHud();
+  renderAdminPanel();
+  if (ws && ws.readyState === 1 && myLocal.twitchId) {
+    ws.send(JSON.stringify({ type: "admin_auth", twitchId: myLocal.twitchId }));
+  }
 }
 
 function showMenu() {
@@ -442,11 +511,34 @@ function connectLobby(serverUrl) {
     if (profile) {
       hydrateProfile(profile);
       sendProgressRequest();
+      ws.send(JSON.stringify({ type: "admin_auth", twitchId: profile.id }));
     }
   });
 
   ws.addEventListener("message", (ev) => {
     const msg = JSON.parse(ev.data);
+
+    if (msg.type === "admin_status") {
+      adminState.enabled = !!msg.enabled;
+      if (!adminState.enabled) {
+        adminState.rows = [];
+        renderAdminTable();
+      }
+      renderAdminPanel();
+      return;
+    }
+
+    if (msg.type === "admin_roster") {
+      adminState.rows = Array.isArray(msg.rows) ? msg.rows : [];
+      renderAdminTable();
+      return;
+    }
+
+    if (msg.type === "admin_result") {
+      setAdminNotice(msg.message || "Action admin exécutée.");
+      requestAdminRoster();
+      return;
+    }
 
     if (msg.type === "status") {
       statusState = {
@@ -465,7 +557,8 @@ function connectLobby(serverUrl) {
     }
 
     if (msg.type === "join_rejected") {
-      authStatus.textContent = "Serveur plein (30 joueurs). Réessaie plus tard.";
+      if (msg.reason === "banned") authStatus.textContent = "Compte banni du serveur.";
+      else authStatus.textContent = "Serveur plein (30 joueurs). Réessaie plus tard.";
       showMenu();
       return;
     }
@@ -509,6 +602,8 @@ function connectLobby(serverUrl) {
   ws.addEventListener("close", () => {
     inGame = false;
     myId = null;
+    adminState.enabled = false;
+    renderAdminPanel();
     renderStatus();
     setTimeout(() => connectLobby(serverUrl), 1200);
   });
@@ -1044,6 +1139,7 @@ twitchBtn.addEventListener("click", () => {
     updateAuthStatus(null);
     renderMenuProfile();
     renderHud();
+    renderAdminPanel();
     return;
   }
 
@@ -1065,6 +1161,39 @@ playBtn.addEventListener("click", () => {
 });
 
 quitBtn.addEventListener("click", leaveGame);
+
+
+if (adminBtn) {
+  adminBtn.addEventListener("click", () => {
+    if (!isAdminUser()) return;
+    const opened = adminDropdown.style.display === "block";
+    adminDropdown.style.display = opened ? "none" : "block";
+    if (!opened) requestAdminRoster();
+  });
+}
+
+if (adminRefreshBtn) {
+  adminRefreshBtn.addEventListener("click", requestAdminRoster);
+}
+
+if (adminAddBotBtn) {
+  adminAddBotBtn.addEventListener("click", () => {
+    if (!isAdminUser() || !ws || ws.readyState !== 1) return;
+    ws.send(JSON.stringify({ type: "admin_add_bot" }));
+  });
+}
+
+if (adminTableBody) {
+  adminTableBody.addEventListener("click", (e) => {
+    const target = e.target;
+    if (!(target instanceof HTMLElement)) return;
+    const action = target.dataset.adminAction;
+    const playerId = target.dataset.playerId;
+    if (!action || !playerId) return;
+    sendAdminAction(action, playerId);
+  });
+}
+
 
 (async () => {
   const serverUrl = getServerUrl();
@@ -1089,4 +1218,8 @@ quitBtn.addEventListener("click", leaveGame);
   if (!inputTimer) inputTimer = setInterval(sendInput, 50);
   setInterval(renderAbilityHud, 120);
   renderAbilityHud();
+  renderAdminPanel();
+  if (ws && ws.readyState === 1 && myLocal.twitchId) {
+    ws.send(JSON.stringify({ type: "admin_auth", twitchId: myLocal.twitchId }));
+  }
 })();

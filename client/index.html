@@ -36,6 +36,26 @@
         <ol id="top10List"></ol>
       </aside>
 
+
+      <div id="adminPanel" class="adminPanel" style="display:none;">
+        <button id="adminBtn" class="adminBtn" type="button">Admin</button>
+        <div id="adminDropdown" class="adminDropdown" style="display:none;">
+          <div class="adminActions">
+            <button id="adminRefreshBtn" type="button">Voir joueurs & bots</button>
+            <button id="adminAddBotBtn" type="button">Ajouter un bot</button>
+          </div>
+          <div id="adminNotice" class="adminNotice"></div>
+          <div class="adminTableWrap">
+            <table class="adminTable">
+              <thead>
+                <tr><th>Nom</th><th>Type</th><th>Masse</th><th>Actions</th></tr>
+              </thead>
+              <tbody id="adminTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
       <button id="quitBtn" class="quitBtn">Quitter</button>
     </header>
 
