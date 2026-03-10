@@ -398,6 +398,7 @@ function snapshotForClient() {
       x: p.x,
       y: p.y,
       mass: p.mass,
+      radius: radiusFromMass(p.mass),
       impulseSignalUntil: p.impulseSignal?.until || 0,
       impulseSignalDir: p.impulseSignal?.dir || null
     });

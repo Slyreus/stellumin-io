@@ -825,6 +825,12 @@ function radiusFromMass(mass) {
   return 18 + Math.pow(safeMass, 0.9) * 0.14;
 }
 
+function getPlayerRadius(player) {
+  const serverRadius = Number(player?.radius);
+  if (Number.isFinite(serverRadius) && serverRadius > 0) return serverRadius;
+  return radiusFromMass(player?.mass);
+}
+
 function drawDustStar(x, y, size, color, alpha = 1) {
   ctx.save();
   ctx.translate(x, y);
@@ -1023,7 +1029,7 @@ function drawPlayerCore(player, r) {
 
 function getCameraScaleForMass(mass) {
   const safeMass = Math.max(10, Number(mass) || 10);
-  const radius = radiusFromMass(safeMass);
+  const radius = getPlayerRadius({ mass: safeMass });
   const referenceRadius = radiusFromMass(10);
   const ratio = Math.max(1, radius / referenceRadius);
   const scale = 1.46 / Math.pow(ratio, 0.2);
@@ -1110,7 +1116,7 @@ function draw() {
   for (const f of state.foods) {
     const isRare = f.kind === "rare";
     const isEjected = f.kind === "ejected";
-    const size = isRare ? f.r * 1.15 : (isEjected ? f.r * 1.05 : f.r * 0.95);
+    const size = f.r;
     const color = isRare
       ? "rgba(255, 228, 120, 0.96)"
       : (isEjected ? "rgba(128, 245, 255, 0.95)" : "rgba(176, 120, 255, 0.9)");
@@ -1119,7 +1125,7 @@ function draw() {
 
   const me = getMe();
   for (const p of state.players) {
-    const r = radiusFromMass(p.mass);
+    const r = getPlayerRadius(p);
     drawPlayerCore(p, r);
     drawImpulseSignal(p, r);
 
