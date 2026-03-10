@@ -1009,9 +1009,15 @@ function drawPlayerCore(player, r) {
 
 function getCameraScaleForMass(mass) {
   const safeMass = Math.max(10, Number(mass) || 10);
-  const ratio = safeMass / 10;
-  const zoomOut = Math.min(0.95, Math.max(0, 1 - 1 / Math.pow(ratio, 0.36)));
-  return 1.42 - zoomOut;
+  const radius = radiusFromMass(safeMass);
+
+  // Dézoom progressif type agar.io : on élargit le cadrage avec la taille,
+  // mais sans ouvrir un champ de vision démesuré.
+  const referenceRadius = radiusFromMass(10);
+  const ratio = Math.max(1, radius / referenceRadius);
+  const scale = 1.35 / Math.pow(ratio, 0.38);
+
+  return Math.max(0.88, Math.min(1.42, scale));
 }
 
 function getCameraPose() {
