@@ -74,7 +74,7 @@ let myLocal = {
 
 const abilityState = {
   mass_eject: { id: "mass_eject", label: "Éjection de masse", key: "C", cooldownMs: 0, charges: Infinity, maxCharges: Infinity, availableAt: 0, disabled: false },
-  stellar_impulse: { id: "stellar_impulse", label: "Impulsion stellaire", key: "Space", cooldownMs: 0, charges: 3, maxCharges: 3, rechargeMs: 30000, rechargeQueue: [], availableAt: 0, disabled: false },
+  stellar_impulse: { id: "stellar_impulse", label: "Impulsion stellaire", key: "Space", cooldownMs: 0, charges: 3, maxCharges: 3, rechargeMs: 45000, nextRechargeAt: 0, availableAt: 0, disabled: false },
   gravitation_pull: { id: "gravitation_pull", label: "Attraction gravitationnelle", key: "—", cooldownMs: Infinity, charges: 0, maxCharges: 0, availableAt: Infinity, disabled: true },
   orbital_comet: { id: "orbital_comet", label: "Comète orbitale", key: "—", cooldownMs: Infinity, charges: 0, maxCharges: 0, availableAt: Infinity, disabled: true }
 };
@@ -90,6 +90,7 @@ const MASS_RADIUS_FACTOR = 0.2;
 const CAMERA_FOLLOW_LERP = 0.17;
 const CAMERA_SCALE_LERP = 0.12;
 const RENDER_MASS_LERP = 0.22;
+const RENDER_POS_LERP = 0.28;
 const backgroundStars = Array.from({ length: 260 }, () => ({
   x: Math.random() * 7000 - 3500,
   y: Math.random() * 7000 - 3500,
@@ -98,6 +99,8 @@ const backgroundStars = Array.from({ length: 260 }, () => ({
   drift: Math.random() * 0.35 + 0.65
 }));
 const renderMassByPlayerId = new Map();
+const renderPoseByPlayerId = new Map();
+const renderPoseByFoodId = new Map();
 const cameraState = {
   initialized: false,
   camX: 0,
@@ -519,6 +522,11 @@ function showMenu() {
   eliminationState = null;
   myId = null;
   renderMassByPlayerId.clear();
+  renderPoseByPlayerId.clear();
+  renderPoseByFoodId.clear();
+  const impulse = abilityState.stellar_impulse;
+  impulse.charges = impulse.maxCharges;
+  impulse.nextRechargeAt = 0;
   cameraState.initialized = false;
   menu.style.display = "grid";
   quitBtn.style.display = "none";
@@ -600,6 +608,9 @@ function connectLobby(serverUrl) {
 
     if (msg.type === "joined") {
       myId = msg.id;
+      const impulse = abilityState.stellar_impulse;
+      impulse.charges = impulse.maxCharges;
+      impulse.nextRechargeAt = 0;
       hideMenu();
       return;
     }
@@ -626,12 +637,16 @@ function connectLobby(serverUrl) {
     if (msg.type === "state") {
       state.players = msg.players || [];
       state.foods = msg.foods || [];
-      const aliveIds = new Set(state.players.map((p) => p.id));
-      for (const id of [...renderMassByPlayerId.keys()]) {
-        if (!aliveIds.has(id)) renderMassByPlayerId.delete(id);
-      }
+      pruneRenderCaches();
       state.world = msg.world || state.world;
       latestTop = msg.top || [];
+
+      const me = state.players.find((p) => p.id === myId);
+      if (me) {
+        const impulse = abilityState.stellar_impulse;
+        impulse.charges = Math.max(0, Math.min(impulse.maxCharges, Number(me.impulseCharges) || impulse.charges));
+        impulse.nextRechargeAt = Math.max(0, Number(me.impulseNextRechargeAt) || impulse.nextRechargeAt || 0);
+      }
 
       renderTopHud();
       renderHud();
@@ -695,30 +710,48 @@ function animateXpGain(amount, totalAfter) {
   setTimeout(() => xpAnim.classList.remove("show"), 2600);
 }
 
-function consumeImpulseCharge() {
+function refreshImpulseState() {
   const ability = abilityState.stellar_impulse;
   const now = Date.now();
-  ability.rechargeQueue = ability.rechargeQueue.filter((t) => t > now);
-  const available = Math.max(0, ability.maxCharges - ability.rechargeQueue.length);
-  if (available <= 0) return false;
-  ability.rechargeQueue.push(now + ability.rechargeMs);
+  ability.charges = Math.max(0, Math.min(ability.maxCharges, Number(ability.charges) || ability.maxCharges));
+  ability.nextRechargeAt = Math.max(0, Number(ability.nextRechargeAt) || 0);
+
+  if (ability.charges >= ability.maxCharges) {
+    ability.charges = ability.maxCharges;
+    ability.nextRechargeAt = 0;
+    return;
+  }
+
+  while (ability.charges < ability.maxCharges && ability.nextRechargeAt > 0 && now >= ability.nextRechargeAt) {
+    ability.charges += 1;
+    if (ability.charges < ability.maxCharges) ability.nextRechargeAt += ability.rechargeMs;
+    else ability.nextRechargeAt = 0;
+  }
+}
+
+function consumeImpulseCharge() {
+  const ability = abilityState.stellar_impulse;
+  refreshImpulseState();
+  if (ability.charges <= 0) return false;
+
+  ability.charges -= 1;
+  if (ability.charges < ability.maxCharges && ability.nextRechargeAt === 0) {
+    ability.nextRechargeAt = Date.now() + ability.rechargeMs;
+  }
   return true;
 }
 
 function computeImpulseCharges() {
-  const ability = abilityState.stellar_impulse;
-  const now = Date.now();
-  ability.rechargeQueue = ability.rechargeQueue.filter((t) => t > now);
-  return Math.max(0, ability.maxCharges - ability.rechargeQueue.length);
+  refreshImpulseState();
+  return abilityState.stellar_impulse.charges;
 }
 
 function getCooldownText(ability) {
   if (ability.disabled) return "CD: —";
   if (ability.id === "stellar_impulse") {
-    const charges = computeImpulseCharges();
-    if (charges >= ability.maxCharges) return "CD: 0s";
-    const next = Math.min(...ability.rechargeQueue);
-    const sec = Math.max(0, Math.ceil((next - Date.now()) / 1000));
+    refreshImpulseState();
+    if (ability.charges >= ability.maxCharges) return "CD: 0s";
+    const sec = Math.max(0, Math.ceil((ability.nextRechargeAt - Date.now()) / 1000));
     return `CD: ${sec}s`;
   }
   return "CD: 0s";
@@ -859,6 +892,34 @@ function getSmoothedMass(player) {
   return next;
 }
 
+
+function getSmoothedPose(cache, entity, fallbackX = 0, fallbackY = 0) {
+  const id = entity?.id;
+  if (!id) return { x: fallbackX, y: fallbackY };
+
+  const targetX = Number(entity.x) || 0;
+  const targetY = Number(entity.y) || 0;
+  const previous = cache.get(id);
+
+  if (!previous) {
+    const initPose = { x: targetX, y: targetY };
+    cache.set(id, initPose);
+    return initPose;
+  }
+
+  previous.x += (targetX - previous.x) * RENDER_POS_LERP;
+  previous.y += (targetY - previous.y) * RENDER_POS_LERP;
+  return previous;
+}
+
+function pruneRenderCaches() {
+  const playerIds = new Set(state.players.map((p) => p.id));
+  const foodIds = new Set(state.foods.map((f) => f.id));
+
+  for (const id of [...renderMassByPlayerId.keys()]) if (!playerIds.has(id)) renderMassByPlayerId.delete(id);
+  for (const id of [...renderPoseByPlayerId.keys()]) if (!playerIds.has(id)) renderPoseByPlayerId.delete(id);
+  for (const id of [...renderPoseByFoodId.keys()]) if (!foodIds.has(id)) renderPoseByFoodId.delete(id);
+}
 function drawDustStar(x, y, size, color, alpha = 1) {
   ctx.save();
   ctx.translate(x, y);
@@ -1156,34 +1217,50 @@ function draw() {
   ctx.scale(scale, scale);
   ctx.translate(-camX, -camY);
 
+  const halfViewW = window.innerWidth / (2 * scale);
+  const halfViewH = window.innerHeight / (2 * scale);
+  const cullPad = 140;
+  const minX = camX - halfViewW - cullPad;
+  const maxX = camX + halfViewW + cullPad;
+  const minY = camY - halfViewH - cullPad;
+  const maxY = camY + halfViewH + cullPad;
+
   for (const f of state.foods) {
+    const pose = getSmoothedPose(renderPoseByFoodId, f, f.x, f.y);
+    if (pose.x < minX || pose.x > maxX || pose.y < minY || pose.y > maxY) continue;
+
     const isRare = f.kind === "rare";
     const isEjected = f.kind === "ejected";
     const size = isRare ? f.r * 1.15 : (isEjected ? f.r * 1.05 : f.r * 0.95);
     const color = isRare
       ? "rgba(255, 228, 120, 0.96)"
       : (isEjected ? "rgba(128, 245, 255, 0.95)" : "rgba(176, 120, 255, 0.9)");
-    drawDustStar(f.x, f.y, size, color);
+    drawDustStar(pose.x, pose.y, size, color);
   }
 
   const me = getMe();
   for (const p of state.players) {
-    const r = radiusFromMass(getSmoothedMass(p));
-    drawPlayerCore(p, r);
-    drawImpulseSignal(p, r);
+    const pose = getSmoothedPose(renderPoseByPlayerId, p, p.x, p.y);
+    const mass = getSmoothedMass(p);
+    const r = radiusFromMass(mass);
+    if (pose.x + r < minX || pose.x - r > maxX || pose.y + r < minY || pose.y - r > maxY) continue;
 
-    const nameSize = Math.max(10, Math.min(18, r * 0.36));
+    const drawPlayer = { ...p, x: pose.x, y: pose.y, mass };
+    drawPlayerCore(drawPlayer, r);
+    drawImpulseSignal(drawPlayer, r);
+
+    const nameSize = Math.max(11, r * 0.36);
     ctx.font = `700 ${nameSize}px system-ui`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     const textColor = getContrastTextForPlayer(p);
     ctx.strokeStyle = textColor === "#f8fafc" ? "rgba(0,0,0,0.45)" : "rgba(255,255,255,0.35)";
-    ctx.lineWidth = 2;
-    ctx.strokeText(p.name, p.x, p.y);
+    ctx.lineWidth = Math.max(2, r * 0.035);
+    ctx.strokeText(p.name, pose.x, pose.y);
     ctx.fillStyle = textColor;
-    ctx.fillText(p.name, p.x, p.y);
+    ctx.fillText(p.name, pose.x, pose.y);
 
-    if (me && p.id === me.id) drawBoundaryWarning(p, r);
+    if (me && p.id === me.id) drawBoundaryWarning(drawPlayer, r);
   }
 
   ctx.restore();
