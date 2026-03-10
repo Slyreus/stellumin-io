@@ -1234,7 +1234,7 @@ function draw() {
     const color = isRare
       ? "rgba(255, 228, 120, 0.96)"
       : (isEjected ? "rgba(128, 245, 255, 0.95)" : "rgba(176, 120, 255, 0.9)");
-    drawDustStar(f.x, f.y, size, color);
+    drawDustStar(pose.x, pose.y, size, color);
   }
 
   const me = getMe();
