@@ -9,6 +9,7 @@ const twitchBtn = $("twitchBtn");
 const authStatus = $("authStatus");
 const menuAvatar = $("menuAvatar");
 const menuPseudo = $("menuPseudo");
+const menuRoleLabel = $("menuRoleLabel");
 const menuXpFill = $("menuXpFill");
 const menuXpText = $("menuXpText");
 const gameStatus = $("gameStatus");
@@ -371,6 +372,23 @@ function computeLevelFromXp(xp) {
   return { lvl, inLevelXp: remaining, next: xpForLevel(lvl) };
 }
 
+
+function titleForLevel(level) {
+  const milestones = [
+    { min: 1, label: "Astre Naissant" },
+    { min: 10, label: "Éclat de Mellumine" },
+    { min: 20, label: "Noyau Radieux" },
+    { min: 30, label: "Gardien Nebulaire" },
+    { min: 40, label: "Souverain Stellaire" },
+    { min: 50, label: "Archonte de Mellumine" }
+  ];
+  let current = milestones[0].label;
+  for (const step of milestones) {
+    if (level >= step.min) current = step.label;
+  }
+  return current;
+}
+
 function resize() {
   const dpr = window.devicePixelRatio || 1;
   canvas.width = Math.floor(window.innerWidth * dpr);
@@ -385,6 +403,7 @@ function renderGlobalProgress(xp) {
   const { lvl, inLevelXp, next } = computeLevelFromXp(safeXp);
   menuXpText.textContent = `EXP globale · Niveau ${lvl} · ${inLevelXp} / ${next}`;
   menuXpFill.style.width = `${Math.floor((inLevelXp / next) * 100)}%`;
+  if (menuRoleLabel) menuRoleLabel.textContent = titleForLevel(lvl);
 }
 
 function renderMenuProfile() {
@@ -803,7 +822,7 @@ function getMe() {
 
 function radiusFromMass(mass) {
   const safeMass = Math.max(1, Number(mass) || 1);
-  return 18 + Math.pow(safeMass, 0.6) * 0.78;
+  return 18 + Math.pow(safeMass, 0.9) * 0.14;
 }
 
 function drawDustStar(x, y, size, color, alpha = 1) {
@@ -952,24 +971,19 @@ function getAvatarVisual(avatarUrl) {
 }
 
 function drawPlayerRadiance(player, r, color) {
+  const massTier = Math.floor((Number(player.mass) || 0) / 1000);
+  const tierBoost = 1 + massTier * 0.14;
   const flow = 0.92 + 0.08 * Math.sin(Date.now() * 0.003 + player.mass * 0.015);
-  const outerRadius = r * 1.46 * flow;
+  const outerRadius = r * (1.46 + massTier * 0.06) * flow;
 
-  const aura = ctx.createRadialGradient(player.x, player.y, r * 0.72, player.x, player.y, outerRadius);
-  aura.addColorStop(0, `rgba(${color.r}, ${color.g}, ${color.b}, 0.25)`);
-  aura.addColorStop(0.7, `rgba(${color.r}, ${color.g}, ${color.b}, 0.11)`);
+  const aura = ctx.createRadialGradient(player.x, player.y, r * 0.7, player.x, player.y, outerRadius);
+  aura.addColorStop(0, `rgba(${color.r}, ${color.g}, ${color.b}, ${0.24 * tierBoost})`);
+  aura.addColorStop(0.6, `rgba(${color.r}, ${color.g}, ${color.b}, ${0.11 * tierBoost})`);
   aura.addColorStop(1, `rgba(${color.r}, ${color.g}, ${color.b}, 0)`);
   ctx.fillStyle = aura;
   ctx.beginPath();
   ctx.arc(player.x, player.y, outerRadius, 0, Math.PI * 2);
   ctx.fill();
-
-  const ringRadius = r * (1.08 + 0.02 * Math.sin(Date.now() * 0.004 + player.mass));
-  ctx.strokeStyle = `rgba(${Math.min(255, color.r + 36)}, ${Math.min(255, color.g + 36)}, ${Math.min(255, color.b + 36)}, 0.32)`;
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.arc(player.x, player.y, ringRadius, 0, Math.PI * 2);
-  ctx.stroke();
 }
 
 function drawPlayerCore(player, r) {
@@ -1010,14 +1024,10 @@ function drawPlayerCore(player, r) {
 function getCameraScaleForMass(mass) {
   const safeMass = Math.max(10, Number(mass) || 10);
   const radius = radiusFromMass(safeMass);
-
-  // Dézoom progressif type agar.io : on élargit le cadrage avec la taille,
-  // mais sans ouvrir un champ de vision démesuré.
   const referenceRadius = radiusFromMass(10);
   const ratio = Math.max(1, radius / referenceRadius);
-  const scale = 1.35 / Math.pow(ratio, 0.38);
-
-  return Math.max(0.88, Math.min(1.42, scale));
+  const scale = 1.46 / Math.pow(ratio, 0.2);
+  return Math.max(0.86, Math.min(1.5, scale));
 }
 
 function getCameraPose() {

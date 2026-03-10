@@ -51,7 +51,7 @@ const dist2 = (ax, ay, bx, by) => {
 
 function radiusFromMass(mass) {
   const safeMass = Math.max(1, Number(mass) || 1);
-  return BASE_RADIUS + Math.pow(safeMass, 0.6) * 0.78;
+  return BASE_RADIUS + Math.pow(safeMass, 0.9) * 0.14;
 }
 
 function speedFromMass(mass) {
