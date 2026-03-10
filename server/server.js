@@ -10,16 +10,17 @@ const MAX_PLAYERS = 30;
 const WORLD_W = 4000;
 const WORLD_H = 4000;
 
-const FOOD_TARGET = 1200;
+const FOOD_TARGET = 800;
 const FOOD_RADIUS = 5;
 const COMMON_FOOD_MASS = 1;
-const RARE_FOOD_MASS = 10;
+const RARE_FOOD_MASS = 5;
 const RARE_FOOD_CHANCE = 0.06;
 
-const BASE_RADIUS = 18;
+const BASE_RADIUS = 0;
+const MASS_RADIUS_FACTOR = 0.2;
 const SPEED = 360;
 const DRAG = 0.92;
-const START_MASS = 10;
+const START_MASS = 100;
 const MASS_TO_GLOBAL_XP_RATE = 0.35;
 
 const MASS_EJECT_MIN_RATIO = 0.01;
@@ -33,8 +34,9 @@ const IMPULSE_MIN = 4;
 const IMPULSE_PUSH = 440;
 const IMPULSE_TELEGRAPH_MS = 1000;
 const IMPULSE_CHARGES = 3;
-const IMPULSE_RECHARGE_MS = 30000;
+const IMPULSE_RECHARGE_MS = 45000;
 const IMPULSE_CHUNK_TARGET = 22;
+const MASS_TRANSFER_RETENTION = 0.9;
 
 const ADMIN_TWITCH_ID = "80576726";
 
@@ -51,7 +53,7 @@ const dist2 = (ax, ay, bx, by) => {
 
 function radiusFromMass(mass) {
   const safeMass = Math.max(1, Number(mass) || 1);
-  return BASE_RADIUS + Math.pow(safeMass, 0.9) * 0.14;
+  return Math.max(6, BASE_RADIUS + safeMass * MASS_RADIUS_FACTOR);
 }
 
 function speedFromMass(mass) {
@@ -114,7 +116,8 @@ function normalizeDir(dx, dy) {
 }
 
 function radiusFromLooseMass(mass) {
-  return Math.max(4, FOOD_RADIUS + Math.sqrt(Math.max(0.1, mass)) * 1.1);
+  const safeMass = Math.max(0.1, Number(mass) || 0.1);
+  return Math.max(3, safeMass * MASS_RADIUS_FACTOR * 0.9);
 }
 
 function makeEjectedMass({ x, y, dx, dy, mass, speed, grantSessionGain = false }) {
@@ -163,15 +166,40 @@ function spawnEjectedChunks(player, dir, totalMass, speed, distance, jitter = 0.
     }));
   }
 }
-function availableImpulseCharges(player) {
+function updateImpulseRecharge(player) {
+  if (!player) return;
+  if (!Number.isFinite(player.impulseCharges)) player.impulseCharges = IMPULSE_CHARGES;
+  if (!Number.isFinite(player.impulseNextRechargeAt)) player.impulseNextRechargeAt = 0;
+
+  if (player.impulseCharges >= IMPULSE_CHARGES) {
+    player.impulseCharges = IMPULSE_CHARGES;
+    player.impulseNextRechargeAt = 0;
+    return;
+  }
+
   const now = Date.now();
-  player.impulseRecharge = player.impulseRecharge.filter((t) => t > now);
-  return Math.max(0, IMPULSE_CHARGES - player.impulseRecharge.length);
+  while (player.impulseCharges < IMPULSE_CHARGES && player.impulseNextRechargeAt > 0 && now >= player.impulseNextRechargeAt) {
+    player.impulseCharges += 1;
+    if (player.impulseCharges < IMPULSE_CHARGES) {
+      player.impulseNextRechargeAt += IMPULSE_RECHARGE_MS;
+    } else {
+      player.impulseNextRechargeAt = 0;
+    }
+  }
+}
+
+function availableImpulseCharges(player) {
+  updateImpulseRecharge(player);
+  return Math.max(0, Math.min(IMPULSE_CHARGES, player.impulseCharges || 0));
 }
 
 function tryConsumeImpulseCharge(player) {
-  if (availableImpulseCharges(player) <= 0) return false;
-  player.impulseRecharge.push(Date.now() + IMPULSE_RECHARGE_MS);
+  updateImpulseRecharge(player);
+  if ((player.impulseCharges || 0) <= 0) return false;
+  player.impulseCharges -= 1;
+  if (player.impulseCharges < IMPULSE_CHARGES && !player.impulseNextRechargeAt) {
+    player.impulseNextRechargeAt = Date.now() + IMPULSE_RECHARGE_MS;
+  }
   return true;
 }
 
@@ -181,7 +209,8 @@ function castMassEject(player, dir) {
   if (player.mass - cost < 6) return false;
 
   player.mass -= cost;
-  spawnEjectedChunks(player, dir, cost, MASS_EJECT_SPEED, 10, 0.04);
+  const transferred = cost * MASS_TRANSFER_RETENTION;
+  spawnEjectedChunks(player, dir, transferred, MASS_EJECT_SPEED, 10, 0.04);
   return true;
 }
 
@@ -189,10 +218,7 @@ function castStellarImpulse(player, dir) {
   if (!tryConsumeImpulseCharge(player)) return false;
 
   const cost = Math.max(IMPULSE_MIN, player.mass * IMPULSE_RATIO);
-  if (player.mass - cost < 6) {
-    player.impulseRecharge.pop();
-    return false;
-  }
+  if (player.mass - cost < 6) return false;
 
   const executeAt = Date.now() + IMPULSE_TELEGRAPH_MS;
   player.pendingImpulses.push({ executeAt, dir, massCost: cost });
@@ -215,7 +241,8 @@ function resolvePendingImpulses(player) {
     if (player.mass - cost < 6) continue;
 
     player.mass -= cost;
-    spawnEjectedChunks(player, { dx: -pending.dir.dx, dy: -pending.dir.dy }, cost, MASS_EJECT_SPEED * 0.72, 12, 0.18);
+    const transferred = cost * MASS_TRANSFER_RETENTION;
+    spawnEjectedChunks(player, { dx: -pending.dir.dx, dy: -pending.dir.dy }, transferred, MASS_EJECT_SPEED * 0.72, 12, 0.18);
     player.vx += pending.dir.dx * IMPULSE_PUSH;
     player.vy += pending.dir.dy * IMPULSE_PUSH;
   }
@@ -390,6 +417,7 @@ function statusForClient() {
 function snapshotForClient() {
   const ps = [];
   for (const p of players.values()) {
+    updateImpulseRecharge(p);
     ps.push({
       id: p.id,
       accountId: p.accountId,
@@ -398,6 +426,8 @@ function snapshotForClient() {
       x: p.x,
       y: p.y,
       mass: p.mass,
+      impulseCharges: availableImpulseCharges(p),
+      impulseNextRechargeAt: p.impulseNextRechargeAt || 0,
       impulseSignalUntil: p.impulseSignal?.until || 0,
       impulseSignalDir: p.impulseSignal?.dir || null
     });
@@ -594,7 +624,8 @@ wss.on("connection", (ws) => {
         kind: "player",
         sessionMassGained: 0,
         input: { dx: 0, dy: 0, mag: 1 },
-        impulseRecharge: [],
+        impulseCharges: IMPULSE_CHARGES,
+        impulseNextRechargeAt: 0,
         pendingImpulses: [],
         impulseSignal: null
       };
@@ -714,12 +745,14 @@ setInterval(() => {
       if (d2 > eatDistance * eatDistance) continue;
 
       if (a.mass > b.mass * 1.12) {
-        a.mass += b.mass * 0.9;
-        a.sessionMassGained += b.mass * 0.75;
+        const gained = b.mass * MASS_TRANSFER_RETENTION;
+        a.mass += gained;
+        a.sessionMassGained += gained * 0.8333;
         deaths.add(b.id);
       } else if (b.mass > a.mass * 1.12) {
-        b.mass += a.mass * 0.9;
-        b.sessionMassGained += a.mass * 0.75;
+        const gained = a.mass * MASS_TRANSFER_RETENTION;
+        b.mass += gained;
+        b.sessionMassGained += gained * 0.8333;
         deaths.add(a.id);
       }
     }
