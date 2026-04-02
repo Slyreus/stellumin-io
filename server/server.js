@@ -35,6 +35,23 @@ const IMPULSE_TELEGRAPH_MS = 1000;
 const IMPULSE_CHARGES = 3;
 const IMPULSE_RECHARGE_MS = 30000;
 const IMPULSE_CHUNK_TARGET = 22;
+const COMET_MAX = 6;
+
+const BLACK_HOLE_MAX = 8;
+const BLACK_HOLE_MIN = 4;
+const BLACK_HOLE_BODY_RADIUS = 22;
+const BLACK_HOLE_ATTRACTION_RADIUS = 290;
+const BLACK_HOLE_PULL_STRENGTH = 120;
+const BLACK_HOLE_SLOW_MAX = 0.72;
+const BLACK_HOLE_SIZE_DRAIN_RATE = 0.01;
+const BLACK_HOLE_TOUCH_DRAIN_RATE = 0.10;
+const BLACK_HOLE_DRIFT_SPEED_MIN = 1.2;
+const BLACK_HOLE_DRIFT_SPEED_MAX = 4.5;
+const BLACK_HOLE_DRIFT_RETARGET_MIN_MS = 10000;
+const BLACK_HOLE_DRIFT_RETARGET_MAX_MS = 22000;
+const MASS_DRAIN_EFFECT_POOL_CAP = 800;
+const MASS_DRAIN_EFFECT_SPEED = 420;
+const MASS_DRAIN_EFFECT_LIFETIME = 900;
 
 const ADMIN_TWITCH_ID = "80576726";
 
@@ -74,6 +91,32 @@ function makeFood() {
     grantSessionGain: true,
     vx: 0,
     vy: 0
+  };
+}
+
+function randomBlackHoleDrift() {
+  const angle = rand(0, Math.PI * 2);
+  const speed = rand(BLACK_HOLE_DRIFT_SPEED_MIN, BLACK_HOLE_DRIFT_SPEED_MAX);
+  return {
+    vx: Math.cos(angle) * speed,
+    vy: Math.sin(angle) * speed,
+    retargetAt: Date.now() + rand(BLACK_HOLE_DRIFT_RETARGET_MIN_MS, BLACK_HOLE_DRIFT_RETARGET_MAX_MS)
+  };
+}
+
+function makeBlackHole() {
+  const drift = randomBlackHoleDrift();
+  return {
+    id: cryptoRandomId(),
+    kind: "black_hole",
+    x: rand(-WORLD_W / 2, WORLD_W / 2),
+    y: rand(-WORLD_H / 2, WORLD_H / 2),
+    bodyRadius: BLACK_HOLE_BODY_RADIUS,
+    coreRadius: BLACK_HOLE_BODY_RADIUS,
+    attractionRadius: BLACK_HOLE_ATTRACTION_RADIUS,
+    vx: drift.vx,
+    vy: drift.vy,
+    retargetAt: drift.retargetAt
   };
 }
 
@@ -242,6 +285,15 @@ let saveTimer = null;
 
 let foods = [];
 for (let i = 0; i < FOOD_TARGET; i++) foods.push(makeFood());
+const cosmicEntities = {
+  blackHoles: [],
+  comets: []
+};
+const blackHoleDrainEffects = [];
+
+for (let i = 0; i < Math.floor(rand(BLACK_HOLE_MIN, BLACK_HOLE_MAX + 1)); i++) {
+  cosmicEntities.blackHoles.push(makeBlackHole());
+}
 
 async function loadProgress() {
   try {
@@ -422,6 +474,12 @@ function snapshotForClient() {
     world: { w: WORLD_W, h: WORLD_H },
     players: ps,
     foods,
+    blackHoles: cosmicEntities.blackHoles,
+    effects: blackHoleDrainEffects,
+    cosmic: {
+      blackHoles: cosmicEntities.blackHoles,
+      comets: cosmicEntities.comets
+    },
     top
   };
 }
@@ -507,6 +565,31 @@ function removePlayerForSocket(ws, reason = "left") {
 
   if (!pendingEliminations.has(pid)) {
     awardGlobalXpAndRemove(pid, reason);
+  }
+}
+
+function spawnDrainEffect(player, blackHole, massLost) {
+  if (massLost <= 0) return;
+  const dir = normalizeDir(blackHole.x - player.x, blackHole.y - player.y);
+  const fromRadius = radiusFromMass(player.mass);
+  const spread = rand(-0.5, 0.5);
+  const jx = dir.dx + spread * 0.25;
+  const jy = dir.dy - spread * 0.25;
+  const nd = normalizeDir(jx, jy);
+
+  blackHoleDrainEffects.push({
+    id: cryptoRandomId(),
+    x: player.x + nd.dx * (fromRadius + rand(0, 8)),
+    y: player.y + nd.dy * (fromRadius + rand(0, 8)),
+    vx: nd.dx * MASS_DRAIN_EFFECT_SPEED * rand(0.88, 1.12),
+    vy: nd.dy * MASS_DRAIN_EFFECT_SPEED * rand(0.88, 1.12),
+    ttl: MASS_DRAIN_EFFECT_LIFETIME,
+    r: Math.max(1.2, Math.min(5.4, Math.sqrt(massLost) * 2.8)),
+    source: "black_hole"
+  });
+
+  if (blackHoleDrainEffects.length > MASS_DRAIN_EFFECT_POOL_CAP) {
+    blackHoleDrainEffects.splice(0, blackHoleDrainEffects.length - MASS_DRAIN_EFFECT_POOL_CAP);
   }
 }
 
@@ -670,6 +753,21 @@ setInterval(() => {
 
   while (foods.length < FOOD_TARGET) foods.push(makeFood());
 
+  for (const hole of cosmicEntities.blackHoles) {
+    if (Date.now() >= hole.retargetAt) {
+      const drift = randomBlackHoleDrift();
+      hole.vx = drift.vx;
+      hole.vy = drift.vy;
+      hole.retargetAt = drift.retargetAt;
+    }
+
+    hole.x = clamp(hole.x + hole.vx * DT, -WORLD_W / 2, WORLD_W / 2);
+    hole.y = clamp(hole.y + hole.vy * DT, -WORLD_H / 2, WORLD_H / 2);
+
+    if (hole.x <= -WORLD_W / 2 || hole.x >= WORLD_W / 2) hole.vx *= -1;
+    if (hole.y <= -WORLD_H / 2 || hole.y >= WORLD_H / 2) hole.vy *= -1;
+  }
+
   for (const f of foods) {
     if (f.justSpawned) {
       f.justSpawned = false;
@@ -688,8 +786,51 @@ setInterval(() => {
     resolvePendingImpulses(p);
     const sp = speedFromMass(p.mass);
     const moveFactor = clamp(Number(p.input.mag), 0, 1);
+    let velocitySlowMultiplier = 1;
+
+    for (const hole of cosmicEntities.blackHoles) {
+      const dx = hole.x - p.x;
+      const dy = hole.y - p.y;
+      const distance = Math.hypot(dx, dy);
+      if (distance > hole.attractionRadius) continue;
+
+      const norm = 1 - clamp(distance / hole.attractionRadius, 0, 1);
+      const pull = BLACK_HOLE_PULL_STRENGTH * norm;
+      const dir = normalizeDir(dx, dy);
+      p.vx += dir.dx * pull * DT;
+      p.vy += dir.dy * pull * DT;
+
+      velocitySlowMultiplier *= 1 - BLACK_HOLE_SLOW_MAX * norm * DT * 1.6;
+
+      let drainRate = 0;
+      const playerRadius = radiusFromMass(p.mass);
+      const blackHoleBodyRadius = Number(hole.bodyRadius) || Number(hole.coreRadius) || BLACK_HOLE_BODY_RADIUS;
+      const touchingBlackHoleBody = distance <= playerRadius + blackHoleBodyRadius;
+      const isLargerInSize = playerRadius > blackHoleBodyRadius;
+      if (touchingBlackHoleBody) {
+        drainRate = BLACK_HOLE_TOUCH_DRAIN_RATE;
+      } else if (isLargerInSize) {
+        drainRate = BLACK_HOLE_SIZE_DRAIN_RATE;
+      }
+
+      if (drainRate > 0 && p.mass > 6) {
+        const maxDrain = Math.max(0, p.mass - 6);
+        const drain = Math.min(maxDrain, p.mass * drainRate * DT);
+        if (drain > 0) {
+          p.mass -= drain;
+          const particles = touchingBlackHoleBody ? 3 : 1;
+          for (let i = 0; i < particles; i++) {
+            spawnDrainEffect(p, hole, drain / particles);
+          }
+        }
+      }
+    }
+
+    velocitySlowMultiplier = clamp(velocitySlowMultiplier, 0.2, 1);
     p.vx = p.vx * DRAG + p.input.dx * sp * moveFactor * (1 - DRAG);
     p.vy = p.vy * DRAG + p.input.dy * sp * moveFactor * (1 - DRAG);
+    p.vx *= velocitySlowMultiplier;
+    p.vy *= velocitySlowMultiplier;
 
     p.x += p.vx * DT;
     p.y += p.vy * DT;
@@ -706,6 +847,17 @@ setInterval(() => {
         if (f.grantSessionGain !== false) p.sessionMassGained += f.mass;
       }
     }
+  }
+
+  for (let i = blackHoleDrainEffects.length - 1; i >= 0; i--) {
+    const fx = blackHoleDrainEffects[i];
+    fx.ttl -= DT * 1000;
+    if (fx.ttl <= 0) {
+      blackHoleDrainEffects.splice(i, 1);
+      continue;
+    }
+    fx.x += fx.vx * DT;
+    fx.y += fx.vy * DT;
   }
 
   const deaths = new Set();

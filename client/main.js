@@ -62,6 +62,9 @@ const avatarColorCtx = avatarColorProbe.getContext("2d", { willReadFrequently: t
 let state = {
   players: [],
   foods: [],
+  blackHoles: [],
+  effects: [],
+  cosmic: { blackHoles: [], comets: [] },
   world: { w: 4000, h: 4000 }
 };
 
@@ -613,6 +616,9 @@ function connectLobby(serverUrl) {
     if (msg.type === "state") {
       state.players = msg.players || [];
       state.foods = msg.foods || [];
+      state.blackHoles = msg.blackHoles || msg.cosmic?.blackHoles || [];
+      state.effects = msg.effects || [];
+      state.cosmic = msg.cosmic || { blackHoles: state.blackHoles, comets: [] };
       state.world = msg.world || state.world;
       lastServerStateAt = Number(msg.t) || Date.now();
       latestTop = msg.top || [];
@@ -857,7 +863,23 @@ function getExtrapolatedRenderState() {
     y: Math.max(-halfH, Math.min(halfH, f.y))
   }));
 
-  return { players, foods };
+  const blackHoles = (state.blackHoles || []).map((h) => {
+    const vx = Number(h.vx) || 0;
+    const vy = Number(h.vy) || 0;
+    return {
+      ...h,
+      x: Math.max(-halfW, Math.min(halfW, h.x + vx * dt)),
+      y: Math.max(-halfH, Math.min(halfH, h.y + vy * dt))
+    };
+  });
+
+  const effects = (state.effects || []).map((fx) => ({
+    ...fx,
+    x: Math.max(-halfW, Math.min(halfW, fx.x)),
+    y: Math.max(-halfH, Math.min(halfH, fx.y))
+  }));
+
+  return { players, foods, blackHoles, effects };
 }
 
 function drawDustStar(x, y, size, color, alpha = 1) {
@@ -1119,6 +1141,58 @@ function drawImpulseSignal(player, radius) {
   drawDustStar(tx, ty, 7, `rgba(180, 245, 255, ${Math.min(0.72, alpha + 0.2)})`, 1);
 }
 
+function drawBlackHole(blackHole) {
+  const bodyRadius = Number(blackHole.bodyRadius) || Number(blackHole.coreRadius) || 22;
+  const attractionRadius = Number(blackHole.attractionRadius) || 290;
+  const pulse = 0.5 + 0.5 * Math.sin(Date.now() * 0.0018 + bodyRadius);
+
+  const aura = ctx.createRadialGradient(
+    blackHole.x,
+    blackHole.y,
+    bodyRadius * 0.6,
+    blackHole.x,
+    blackHole.y,
+    attractionRadius
+  );
+  aura.addColorStop(0, "rgba(6, 0, 20, 0.92)");
+  aura.addColorStop(0.35, `rgba(55, 15, 120, ${0.2 + pulse * 0.12})`);
+  aura.addColorStop(1, "rgba(80, 10, 180, 0)");
+  ctx.fillStyle = aura;
+  ctx.beginPath();
+  ctx.arc(blackHole.x, blackHole.y, attractionRadius, 0, Math.PI * 2);
+  ctx.fill();
+
+  const ringR = bodyRadius * (1.8 + pulse * 0.35);
+  ctx.strokeStyle = `rgba(165, 120, 255, ${0.45 + pulse * 0.3})`;
+  ctx.lineWidth = 2.2;
+  ctx.beginPath();
+  ctx.arc(blackHole.x, blackHole.y, ringR, 0, Math.PI * 2);
+  ctx.stroke();
+
+  const core = ctx.createRadialGradient(
+    blackHole.x - bodyRadius * 0.25,
+    blackHole.y - bodyRadius * 0.25,
+    bodyRadius * 0.1,
+    blackHole.x,
+    blackHole.y,
+    bodyRadius
+  );
+  core.addColorStop(0, "rgba(28, 0, 60, 0.85)");
+  core.addColorStop(0.55, "rgba(2, 0, 10, 0.98)");
+  core.addColorStop(1, "rgba(0, 0, 0, 1)");
+  ctx.fillStyle = core;
+  ctx.beginPath();
+  ctx.arc(blackHole.x, blackHole.y, bodyRadius, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawMassDrainEffect(fx) {
+  const ttl = Math.max(0, Number(fx.ttl) || 0);
+  const alpha = Math.max(0.1, Math.min(0.9, ttl / 900));
+  const size = Math.max(1.1, Number(fx.r) || 2.2);
+  drawDustStar(fx.x, fx.y, size, `rgba(214, 190, 255, ${alpha})`, 0.95);
+}
+
 
 function getContrastTextForPlayer(player) {
   const visual = getAvatarVisual(player.avatar);
@@ -1150,6 +1224,14 @@ function draw() {
       ? "rgba(255, 228, 120, 0.96)"
       : (isEjected ? "rgba(128, 245, 255, 0.95)" : "rgba(176, 120, 255, 0.9)");
     drawDustStar(f.x, f.y, size, color);
+  }
+
+  for (const hole of renderState.blackHoles || []) {
+    drawBlackHole(hole);
+  }
+
+  for (const fx of renderState.effects || []) {
+    if (fx.source === "black_hole") drawMassDrainEffect(fx);
   }
 
   const me = getMe(renderState.players);
